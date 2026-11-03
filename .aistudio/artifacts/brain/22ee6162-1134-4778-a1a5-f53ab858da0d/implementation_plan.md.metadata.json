@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for upgrading the bilingual Korean/Spanish parable study app ('비유와 성구 시험' / 'Parábolas y Versículos') with modular JSON/CSS architecture, 2-step progressive answer & verse reveal, full Bible verse text display (개역한글판 & Reina-Valera 1960), a dedicated '집중공부' (Intensive Study) tab with Card, Typing, and Mini-Exam modes, and an '고급학습기능' (Advanced Study Mode) featuring post-reveal Study Tip Notes, a consolidated Notebook viewer, and per-question accuracy/mistake statistics.",
-  "updatedAt": "2026-11-03T01:36:46.530982449Z",
+  "summary": "GitHub 및 Vercel 배포 시 발생하는 'Command npm install exited with 1' 오류의 원인을 분석하고, AI Studio 내부 환경과 외부 표준 npm 레지스트리(Vercel) 양쪽에서 모두 호환되도록 의존성 버전 범위 조정, 미사용 패키지 제거, .npmrc 및 vercel.json 설정을 보강하는 수정 계획서입니다.",
+  "updatedAt": "2026-11-03T05:17:36.002882040Z",
   "requestFeedback": true,
   "userFacing": true
 }
