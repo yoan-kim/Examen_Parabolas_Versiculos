@@ -1,0 +1,63 @@
+/* ==========================================================================
+   Modular Theme & Component Styles for 비유와 성구 시험 / Parábolas y Versículos
+   ========================================================================== */
+
+:root {
+  --brand-primary: #0284c7;
+  --brand-primary-hover: #0369a1;
+  --brand-success: #059669;
+  --brand-warning: #d97706;
+  --brand-advanced: #4f46e5;
+  --brand-advanced-hover: #4338ca;
+  --surface-bg: #f8fafc;
+  --card-bg: #ffffff;
+  --border-subtle: #e2e8f0;
+}
+
+/* 2-Step Opaque Answer Cover Card */
+.answer-cover-card {
+  background-color: #ffffff;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  transition: all 0.16s ease;
+  user-select: none;
+}
+
+.answer-cover-card:hover {
+  border-color: var(--brand-primary);
+  background-color: #f8fafc;
+}
+
+/* Scripture Original Text Box (개역한글판 / Reina-Valera 1960) */
+.scripture-box {
+  background-color: #f8fafc;
+  border-left: 3px solid var(--brand-primary);
+  border-radius: 0.5rem;
+}
+
+/* Advanced Study Mode Accent Styling */
+.advanced-mode-ring {
+  border-color: rgba(79, 70, 229, 0.35);
+}
+
+.advanced-note-panel {
+  background-color: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 0.75rem;
+}
+
+/* Hover Tooltip Popup for Advanced Study Mode Button */
+.advanced-tooltip-popup {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+  pointer-events: none;
+}
+
+.advanced-tooltip-trigger:hover .advanced-tooltip-popup,
+.advanced-tooltip-trigger:focus-within .advanced-tooltip-popup {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}

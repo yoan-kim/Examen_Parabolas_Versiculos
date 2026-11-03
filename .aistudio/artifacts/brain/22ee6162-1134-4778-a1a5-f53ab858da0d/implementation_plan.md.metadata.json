@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for upgrading the bilingual Korean/Spanish parable study app ('비유와 성구 시험' / 'Parábolas y Versículos') with modular JSON/CSS architecture, 2-step progressive answer & verse reveal, full Bible verse text display (개역한글판 & Reina-Valera 1960), a dedicated '집중공부' (Intensive Study) tab with Card, Typing, and Mini-Exam modes, and an '고급학습기능' (Advanced Study Mode) featuring post-reveal Study Tip Notes, a consolidated Notebook viewer, and per-question accuracy/mistake statistics.",
+  "updatedAt": "2026-11-03T01:36:46.530982449Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

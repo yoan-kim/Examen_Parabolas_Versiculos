@@ -1,0 +1,22 @@
+[
+  { "id": 1, "titleEs": "1. Parábola", "titleKo": "1장. 비유" },
+  { "id": 2, "titleEs": "2. Semilla, campo, árbol, ave", "titleKo": "2장. 씨, 밭, 나무, 새" },
+  { "id": 3, "titleEs": "3. Alimento y levadura", "titleKo": "3장. 양식과 누룩" },
+  { "id": 4, "titleEs": "4. Recipiente, balanza, vara", "titleKo": "4장. 그릇, 저울, 지팡이" },
+  { "id": 5, "titleEs": "5. Fuego, incensario, olla", "titleKo": "5장. 불, 향로, 가마" },
+  { "id": 6, "titleEs": "6. Luz, tinieblas, ojo, ropa", "titleKo": "6장. 빛, 어둠, 눈, 옷" },
+  { "id": 7, "titleEs": "7. Tesoro y rico", "titleKo": "7장. 보화와 부자" },
+  { "id": 8, "titleEs": "8. Agua, manantial, río", "titleKo": "8장. 물, 샘, 강" },
+  { "id": 9, "titleEs": "9. Mar, pescador, red, pez, barco", "titleKo": "9장. 바다, 어부, 그물, 고기, 배" },
+  { "id": 10, "titleEs": "10. Bestia, cabeza, cuerno, cola", "titleKo": "10장. 짐승, 머리, 뿔, 꼬리" },
+  { "id": 11, "titleEs": "11. Cordero, vino nuevo, aceite", "titleKo": "11장. 어린양, 새 포도주, 감람유" },
+  { "id": 12, "titleEs": "12. Monte, piedra, ídolo", "titleKo": "12장. 산, 돌, 우상" },
+  { "id": 13, "titleEs": "13. Sello, trompeta, cántico", "titleKo": "13장. 인, 나팔, 노래" },
+  { "id": 14, "titleEs": "14. Cuatro seres vivientes, viento, aliento de vida", "titleKo": "14장. 네 생물, 바람, 생기" },
+  { "id": 15, "titleEs": "15. Muerte, sepultura, resurrección", "titleKo": "15장. 죽음, 무덤, 부활" },
+  { "id": 16, "titleEs": "16. Esposo, esposa, viuda, huérfano", "titleKo": "16장. 신랑, 신부, 과부, 고아" },
+  { "id": 17, "titleEs": "17. Jerusalén, Babilonia, guerra, arma", "titleKo": "17장. 예루살렘, 바벨론, 전쟁, 병기" },
+  { "id": 18, "titleEs": "18. Cielo, tierra, sol, luna, estrellas", "titleKo": "18장. 하늘, 땅, 해, 달, 별" },
+  { "id": 19, "titleEs": "19. Israel", "titleKo": "19장. 이스라엘" },
+  { "id": 20, "titleEs": "20. Reino de los cielos y llave", "titleKo": "20장. 천국과 열쇠" }
+]
