@@ -89,6 +89,13 @@ export interface LocalizedStrings {
   checkboxPrioritizeWeak: string;
   curriculumTitle: string;
   curriculumSubtitle: string;
+  curriculumExpandBtn: string;
+  curriculumCollapseBtn: string;
+  btnResetStudyTop: string;
+  btnResetStudyTopTooltip: string;
+  studyResetDoneBanner: string;
+  dayDropdownBadge: (day: number) => string;
+  dayDropdownOption: (day: number, subtitle: string) => string;
   btnResetProgress: string;
   autoSaveNote: string;
   examTitle: (day: number) => string;
@@ -98,6 +105,25 @@ export interface LocalizedStrings {
   examOriginalOrder: string;
   examInputPlaceholderForward: string;
   examSubmitAndCheck: string;
+  examCheckAllBtn: string;
+  examTopPassNotice: string;
+  examOneWayNotice: string;
+  examOnePassGuide: string;
+  examLockedInputNotice: string;
+  examResetBtn: string;
+  examResetBtnTooltip: string;
+  examResetDoneBanner: string;
+  examAnsweredStatus: (answered: number, total: number) => string;
+  examYourAnswerLabel: string;
+  examNoAnswerEntered: string;
+  examPassBadge: string;
+  examPassHeadline: string;
+  examPassSubtext: string;
+  examFailBadge: string;
+  examFailWarningLabel: string;
+  examFailVerseText: string;
+  examFailVerseRef: string;
+  examAllQuestionsReviewTitle: string;
   examModelAnswer: string;
   examAutoMatchedNotice: string;
   examSelfGradeLabel: string;
@@ -111,6 +137,7 @@ export interface LocalizedStrings {
   examResultsTitle: (day: number) => string;
   examReviewMistakesTitle: string;
   examFinalScoreLabel: string;
+  examPassCriteriaNotice: string;
   examCorrectCountLabel: string;
   examWrongCountLabel: string;
   examReviewMistakesBtn: (count: number) => string;
@@ -174,7 +201,7 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     statAccuracyBadge: (accuracy: number, wrong: number, total: number) =>
       `정답률 ${accuracy}% · 오답 ${wrong}회 (총 ${total}회)`,
     statNoAttemptsBadge: '풀이 기록 없음',
-    kickerSummary: '20개 장 · 99문항 · 일일 10문항',
+    kickerSummary: '총 20개 장 · 일일 10문항',
     statCurrentDay: '학습 회차',
     statTodayComposition: '오늘 문항',
     statMasteredConcepts: '암기 완료',
@@ -234,15 +261,42 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     checkboxPrioritizeWeak: '미암기·집중공부 우선 추출',
     curriculumTitle: '20일 진도표',
     curriculumSubtitle: '1일차 10 · 2일차~ 신규 5 + 복습 5',
+    curriculumExpandBtn: '진도표 펼치기',
+    curriculumCollapseBtn: '진도표 접기',
+    btnResetStudyTop: '시험 리셋',
+    btnResetStudyTopTooltip: '학습팁 노트는 그대로 보존하고 작성한 답안 칸만 모두 지워 처음부터 다시 볼 수 있습니다.',
+    studyResetDoneBanner: '작성했던 모든 답안 칸이 초기화되었습니다. (학습팁 노트는 안전하게 유지됨)',
+    dayDropdownBadge: (day: number) => `${day}일차`,
+    dayDropdownOption: (day: number, subtitle: string) => `${day}일차 · ${subtitle}`,
     btnResetProgress: '초기화',
     autoSaveNote: '자동 저장됨',
     examTitle: (day: number) => `${day}일차 시험`,
     examModeWritten: '타이핑',
     examModeMultipleChoice: '객관식',
-    examShuffleOrder: '순서 섞기',
+    examShuffleOrder: '무작위 순서',
     examOriginalOrder: '기본 순서',
     examInputPlaceholderForward: '정답 입력...',
-    examSubmitAndCheck: '채점',
+    examSubmitAndCheck: '채점하기',
+    examCheckAllBtn: '최종 결과 보기',
+    examTopPassNotice: '시험 합격 기준은 80점 입니다.',
+    examOneWayNotice: '※ 엔터(↵)를 누르면 즉시 채점되며, 채점된 답안은 수정할 수 없습니다. 재응시하려면 오른쪽 상단 [시험 리셋]을 누르세요.',
+    examOnePassGuide: '문항은 매번 무작위 순서로 출제됩니다. 각 문제마다 엔터(↵)를 눌러 즉시 채점하고 다음 문제로 진행하세요.',
+    examLockedInputNotice: '🔒 채점이 완료된 문항은 지우거나 다시 작성할 수 없습니다. 처음부터 다시 시험을 보려면 우측 상단의 [시험 리셋] 버튼을 눌러주세요.',
+    examResetBtn: '시험 리셋',
+    examResetBtnTooltip: '학습팁 노트는 안전하게 보존하고, 현재 시험 답안을 모두 초기화하여 1번부터 새로운 무작위 순서로 다시 시험을 봅니다.',
+    examResetDoneBanner: '시험이 초기화되었습니다. 1번부터 새로운 무작위 순서로 다시 시험을 시작합니다. (학습팁 노트는 안전하게 유지됨)',
+    examAnsweredStatus: (answered: number, total: number) => `채점 완료 ${answered} / ${total}`,
+    examYourAnswerLabel: '내가 작성한 답안:',
+    examNoAnswerEntered: '(미입력)',
+    examPassBadge: '🎉 합격 (80점 이상)',
+    examPassHeadline: '식사 맛있게하세요 🍚🥢😋🎉',
+    examPassSubtext: '수고하셨습니다! 오늘 시험에 당당히 합격하셨습니다 🥰🍱✨',
+    examFailBadge: '⚠️ 불합격 (80점 미만 · 재시험 필요)',
+    examFailWarningLabel: '경고 말씀 · 데살로니가후서 3:10 (개역한글판)',
+    examFailVerseText:
+      '"우리가 너희와 함께 있을 때에도 너희에게 명하기를 누구든지 일하기 싫어하거든 먹지도 말게 하라 하였더니"',
+    examFailVerseRef: '— 데살로니가후서 3:10',
+    examAllQuestionsReviewTitle: '전체 문항 채점 결과 및 정답 확인',
     examModelAnswer: '정답',
     examAutoMatchedNotice: '정답 · 증거성구 모두 일치',
     examSelfGradeLabel: '기록:',
@@ -251,15 +305,16 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     examCorrectBadge: '✓ 정답',
     examWrongBadge: '✕ 오답',
     examPrevQuestion: '이전',
-    examNextQuestion: '다음',
+    examNextQuestion: '다음 문제',
     examFinishBtn: '결과 보기',
     examResultsTitle: (day: number) => `${day}일차 시험 결과`,
     examReviewMistakesTitle: '오답 복습 시험',
     examFinalScoreLabel: '최종 점수',
+    examPassCriteriaNotice: '합격 기준: 80점 이상 (10문항 중 8문항 이상 정답)',
     examCorrectCountLabel: '정답 (통과)',
     examWrongCountLabel: '오답 (집중공부)',
     examReviewMistakesBtn: (count: number) => `오답 다시 풀기 (${count})`,
-    examRetryAllBtn: '전체 다시 시험보기 (10문항)',
+    examRetryAllBtn: '시험 다시보기',
     examPerfectScoreMsg: '모든 문항을 정확히 맞추셨습니다!',
     examMistakesListTitle: '오답 문항 확인',
     examBackToStudyBtn: '학습 화면으로',
@@ -320,7 +375,7 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     statAccuracyBadge: (accuracy: number, wrong: number, total: number) =>
       `Precisión ${accuracy}% · Errores: ${wrong} (${total} int.)`,
     statNoAttemptsBadge: 'Sin registros',
-    kickerSummary: '20 cap. · 99 preg. · 10 diarias',
+    kickerSummary: 'Total 20 capítulos · 10 preguntas diarias',
     statCurrentDay: 'Día actual',
     statTodayComposition: 'Hoy',
     statMasteredConcepts: 'Aprendidas',
@@ -380,15 +435,42 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     checkboxPrioritizeWeak: 'Priorizar estudio intensivo',
     curriculumTitle: 'Plan 20 Días',
     curriculumSubtitle: 'Día 1: 10 · Día 2+: 5 nuevas + 5 repaso',
+    curriculumExpandBtn: 'Ver plan de 20 días',
+    curriculumCollapseBtn: 'Ocultar plan',
+    btnResetStudyTop: 'Reiniciar examen',
+    btnResetStudyTopTooltip: 'Borra únicamente las respuestas escritas para volver a practicar desde el inicio, conservando intactas todas sus notas de estudio.',
+    studyResetDoneBanner: 'Se han borrado todas las respuestas escritas. (Sus notas de estudio se conservan intactas)',
+    dayDropdownBadge: (day: number) => `Día ${day}`,
+    dayDropdownOption: (day: number, subtitle: string) => `Día ${day} · ${subtitle}`,
     btnResetProgress: 'Reiniciar',
     autoSaveNote: 'Guardado automático',
     examTitle: (day: number) => `Examen · Día ${day}`,
     examModeWritten: 'Escritura',
     examModeMultipleChoice: 'Opciones',
-    examShuffleOrder: 'Mezclar',
+    examShuffleOrder: 'Orden aleatorio',
     examOriginalOrder: 'Ordenar',
     examInputPlaceholderForward: 'Respuesta...',
     examSubmitAndCheck: 'Calificar',
+    examCheckAllBtn: 'Ver resultado final',
+    examTopPassNotice: 'El criterio de aprobación del examen es de 80 puntos.',
+    examOneWayNotice: '※ Al pulsar Intro(↵) se califica al instante y no se puede borrar ni modificar. Para repetir, pulse [Reiniciar examen] arriba a la derecha.',
+    examOnePassGuide: 'Las preguntas aparecen en orden aleatorio cada vez. Pulse Intro(↵) en cada pregunta para calificarla y avanzar.',
+    examLockedInputNotice: '🔒 Las respuestas ya calificadas no se pueden borrar ni editar. Si desea repetir el examen desde el principio, pulse el botón [Reiniciar examen] arriba a la derecha.',
+    examResetBtn: 'Reiniciar examen',
+    examResetBtnTooltip: 'Conserva intactas todas sus notas de estudio y reinicia el examen desde la pregunta 1 en un nuevo orden aleatorio.',
+    examResetDoneBanner: 'El examen ha sido reiniciado desde el principio con un nuevo orden aleatorio. (Sus notas de estudio se conservan intactas)',
+    examAnsweredStatus: (answered: number, total: number) => `Calificadas ${answered} / ${total}`,
+    examYourAnswerLabel: 'Su respuesta:',
+    examNoAnswerEntered: '(Sin responder)',
+    examPassBadge: '🎉 APROBADO (80% o más)',
+    examPassHeadline: '¡Buen provecho! · Buen probecho 🍽️😋🎉',
+    examPassSubtext: '¡Felicidades! Ha aprobado el examen satisfactoriamente 🥰🍲✨',
+    examFailBadge: '⚠️ NO APROBADO (Menos del 80%)',
+    examFailWarningLabel: 'ADVERTENCIA BÍBLICA · 2 Tesalonicenses 3:10 (Reina-Valera 1960)',
+    examFailVerseText:
+      '"Porque también cuando estábamos con vosotros, os ordenábamos esto: Si alguno no quiere trabajar, tampoco coma."',
+    examFailVerseRef: '— 2 Tesalonicenses 3:10 (Reina-Valera 1960)',
+    examAllQuestionsReviewTitle: 'Revisión completa de respuestas y versículos',
     examModelAnswer: 'Respuesta',
     examAutoMatchedNotice: '¡Respuesta y versículos correctos!',
     examSelfGradeLabel: 'Evaluar:',
@@ -397,15 +479,16 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     examCorrectBadge: '✓ Correcto',
     examWrongBadge: '✕ Incorrecto',
     examPrevQuestion: 'Anterior',
-    examNextQuestion: 'Siguiente',
+    examNextQuestion: 'Siguiente pregunta',
     examFinishBtn: 'Ver resultados',
     examResultsTitle: (day: number) => `Resultados del Examen · Día ${day}`,
     examReviewMistakesTitle: 'Repaso de Errores',
     examFinalScoreLabel: 'Puntaje Final',
+    examPassCriteriaNotice: 'Criterio de aprobación: 80% o más (mínimo 8 de 10 correctas)',
     examCorrectCountLabel: 'Correctas (Aprobadas)',
     examWrongCountLabel: 'Incorrectas (Estudio intensivo)',
     examReviewMistakesBtn: (count: number) => `Repasar errores (${count})`,
-    examRetryAllBtn: 'Repetir examen completo (10)',
+    examRetryAllBtn: 'Volver a realizar el examen',
     examPerfectScoreMsg: '¡Respondiste correctamente todas las preguntas!',
     examMistakesListTitle: 'Preguntas incorrectas',
     examBackToStudyBtn: 'Volver al estudio',

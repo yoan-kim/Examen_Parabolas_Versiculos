@@ -13,6 +13,9 @@ import {
   Bookmark,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
   Search,
   RotateCcw,
   CheckCircle2,
@@ -64,6 +67,20 @@ interface TypingCardState {
   result: TypingValidationResult | null;
 }
 
+interface ExamDraftEntry {
+  answer: string;
+  verse: string;
+}
+
+function shuffleCardsRandomly<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export default function App() {
   // Language selection state: null = initial Language Selection Gate screen
   const [language, setLanguage] = useState<AppLanguage | null>(null);
@@ -85,6 +102,16 @@ export default function App() {
 
   // Notebook Modal state (in Advanced Study Mode)
   const [isNotebookModalOpen, setIsNotebookModalOpen] = useState<boolean>(false);
+
+  // 20-Day Curriculum Schedule collapsed by default
+  const [isCurriculumOpen, setIsCurriculumOpen] = useState<boolean>(false);
+
+  // Day selector dropdown open state (top summary bar)
+  const [isDayDropdownOpen, setIsDayDropdownOpen] = useState<boolean>(false);
+  const dayDropdownContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Exam Reset feedback banner state (shown inside Exam tab)
+  const [examResetBannerVisible, setExamResetBannerVisible] = useState<boolean>(false);
 
   // Per-question Study Tip Notes ("학습팁 노트")
   const [studyNotes, setStudyNotes] = useState<Record<number, string>>(() => {
@@ -162,21 +189,38 @@ export default function App() {
   // Typing study state per card uid
   const [typingEntries, setTypingEntries] = useState<Record<string, TypingCardState>>({});
 
-  // Exam state (10 questions per day: Question -> Answer ONLY, 100% Typing)
+  // Exam state (per-question immediate grading on Enter, locked inputs once graded, randomized every time)
   const [examIndex, setExamIndex] = useState<number>(0);
-  const [examInput, setExamInput] = useState<string>('');
-  const [examVerseInput, setExamVerseInput] = useState<string>('');
-  const [examSubmitted, setExamSubmitted] = useState<boolean>(false);
-  const [examValidation, setExamValidation] = useState<TypingValidationResult | null>(null);
+  const [examDrafts, setExamDrafts] = useState<Record<string, ExamDraftEntry>>({});
+  const [examBatchValidations, setExamBatchValidations] = useState<
+    Record<string, TypingValidationResult>
+  >({});
   const [examResults, setExamResults] = useState<Record<string, 'correct' | 'review_again'>>({});
-  const [examShuffleOrder, setExamShuffleOrder] = useState<boolean>(false);
+  const [examSessionSeed, setExamSessionSeed] = useState<number>(0);
   const [examShowResults, setExamShowResults] = useState<boolean>(false);
   const [examMistakeUids, setExamMistakeUids] = useState<string[] | null>(null);
 
-  // Refs for seamless keyboard Enter -> Check -> Enter -> Next question flow
+  // Refs for seamless keyboard navigation
   const examAnswerInputRef = useRef<HTMLInputElement | null>(null);
+  const examNextActionBtnRef = useRef<HTMLButtonElement | null>(null);
+  const lastExamGradeTimeRef = useRef<number>(0);
   const studyAnswerInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const lastSubmitTimeRef = useRef<number>(0);
+
+  // Close day dropdown on outside click
+  useEffect(() => {
+    if (!isDayDropdownOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        dayDropdownContainerRef.current &&
+        !dayDropdownContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsDayDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    return () => window.removeEventListener('mousedown', handleOutsideClick);
+  }, [isDayDropdownOpen]);
 
   // Catalog filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -275,6 +319,34 @@ export default function App() {
     masteredIds
   ]);
 
+  // Helper to start or restart the exam with a brand-new random order
+  const startNewRandomExamSession = (mistakeUids: string[] | null = null) => {
+    setExamSessionSeed((s) => s + 1);
+    setExamIndex(0);
+    setExamDrafts({});
+    setExamBatchValidations({});
+    setExamResults({});
+    setExamMistakeUids(mistakeUids);
+    setExamShowResults(false);
+  };
+
+  // Exam-tab-only Reset handler: clears exam drafts & results and starts over in a fresh random order while preserving studyNotes
+  const handleResetExam = () => {
+    startNewRandomExamSession(null);
+    setExamResetBannerVisible(true);
+    setTimeout(() => {
+      setExamResetBannerVisible(false);
+    }, 3200);
+  };
+
+  // Select day from dropdown or curriculum and load that day's study & exam questions
+  const handleSelectDay = (day: number) => {
+    setSelectedDay(day);
+    setFocusCardIndex(0);
+    setIsDayDropdownOpen(false);
+    startNewRandomExamSession(null);
+  };
+
   const handleRerollReviews = () => {
     if (currentSchedule.reviewConceptCount === 0) return;
     const weakPool = currentSchedule.learnedPoolIds.filter(
@@ -287,14 +359,7 @@ export default function App() {
     );
     setDailyReviews((prev) => ({ ...prev, [selectedDay]: picked }));
     setFocusCardIndex(0);
-    setExamIndex(0);
-    setExamSubmitted(false);
-    setExamValidation(null);
-    setExamInput('');
-    setExamVerseInput('');
-    setExamShowResults(false);
-    setExamMistakeUids(null);
-    setExamResults({});
+    startNewRandomExamSession(null);
   };
 
   // All 10 Question -> Answer cards for the current day
@@ -312,22 +377,21 @@ export default function App() {
     });
   }, [allDayCards, originFilter]);
 
-  // Exam items
+  // Exam items: freshly randomized every time the user enters the exam tab or clicks retry
   const examCards = useMemo(() => {
-    if (!examShuffleOrder) return allDayCards;
-    return [...allDayCards].sort((a, b) => {
-      const hashA = (a.question.id * 37 + 11) % 101;
-      const hashB = (b.question.id * 37 + 11) % 101;
-      return hashA - hashB;
-    });
-  }, [allDayCards, examShuffleOrder]);
+    void examSessionSeed;
+    return shuffleCardsRandomly(allDayCards);
+  }, [allDayCards, examSessionSeed]);
 
   const activeExamCards = useMemo(() => {
+    void examSessionSeed;
     if (examMistakeUids && examMistakeUids.length > 0) {
-      return examCards.filter((c) => examMistakeUids.includes(c.uid));
+      return shuffleCardsRandomly(
+        allDayCards.filter((c) => examMistakeUids.includes(c.uid))
+      );
     }
     return examCards;
-  }, [examCards, examMistakeUids]);
+  }, [allDayCards, examCards, examMistakeUids, examSessionSeed]);
 
   const currentExamCard = activeExamCards[examIndex] || activeExamCards[0];
 
@@ -496,50 +560,73 @@ export default function App() {
     }
   };
 
-  const submitCurrentExamCard = () => {
+  // Exam draft helpers (per-question immediate grading on Enter; once graded, locked and cannot be edited)
+  const getExamDraft = (uid: string): ExamDraftEntry => {
+    return examDrafts[uid] || { answer: '', verse: '' };
+  };
+
+  const updateExamDraftAnswer = (uid: string, answer: string) => {
+    if (examBatchValidations[uid]) return; // Locked once graded
+    setExamDrafts((prev) => {
+      const existing = prev[uid] || { answer: '', verse: '' };
+      return {
+        ...prev,
+        [uid]: { ...existing, answer }
+      };
+    });
+  };
+
+  const updateExamDraftVerse = (uid: string, verse: string) => {
+    if (examBatchValidations[uid]) return; // Locked once graded
+    setExamDrafts((prev) => {
+      const existing = prev[uid] || { answer: '', verse: '' };
+      return {
+        ...prev,
+        [uid]: { ...existing, verse }
+      };
+    });
+  };
+
+  // Grade the current exam question immediately on Enter, lock inputs, and show right/wrong details
+  const gradeCurrentExamQuestion = () => {
     if (!language || !currentExamCard) return;
-    lastSubmitTimeRef.current = Date.now();
+    if (examBatchValidations[currentExamCard.uid]) return;
+
+    lastExamGradeTimeRef.current = Date.now();
+    const draft = examDrafts[currentExamCard.uid] || { answer: '', verse: '' };
     const res = evaluateTypingSubmission(
       currentExamCard.question,
-      examInput,
-      examVerseInput,
+      draft.answer,
+      draft.verse,
       language
     );
-    setExamValidation(res);
-    setExamSubmitted(true);
+
+    setExamBatchValidations((prev) => ({
+      ...prev,
+      [currentExamCard.uid]: res
+    }));
     setExamResults((prev) => ({
       ...prev,
       [currentExamCard.uid]: res.isCorrect ? 'correct' : 'review_again'
     }));
     handleRecordQuestionAttempt(currentExamCard.question.id, res.isCorrect);
+
     if (res.isCorrect && !masteredIds.includes(currentExamCard.question.id)) {
       setMasteredIds((prev) => [...prev, currentExamCard.question.id]);
+    } else if (!res.isCorrect && !bookmarkedIds.includes(currentExamCard.question.id)) {
+      setBookmarkedIds((prev) => [...prev, currentExamCard.question.id]);
     }
+
+    setTimeout(() => {
+      examNextActionBtnRef.current?.focus();
+    }, 30);
   };
 
-  const advanceExamToNextOrFinish = () => {
-    if (!language || !currentExamCard) return;
-    if (!examSubmitted) {
-      const res = evaluateTypingSubmission(
-        currentExamCard.question,
-        examInput,
-        examVerseInput,
-        language
-      );
-      setExamValidation(res);
-      setExamSubmitted(true);
-      setExamResults((prev) => ({
-        ...prev,
-        [currentExamCard.uid]: res.isCorrect ? 'correct' : 'review_again'
-      }));
-      handleRecordQuestionAttempt(currentExamCard.question.id, res.isCorrect);
-    }
+  // Advance to the next exam question after grading, or show final Pass/Fail results
+  const advanceExamAfterGrading = () => {
+    if (!currentExamCard || !examBatchValidations[currentExamCard.uid]) return;
     if (examIndex < activeExamCards.length - 1) {
       setExamIndex((i) => Math.min(activeExamCards.length - 1, i + 1));
-      setExamSubmitted(false);
-      setExamValidation(null);
-      setExamInput('');
-      setExamVerseInput('');
       setTimeout(() => {
         examAnswerInputRef.current?.focus();
       }, 30);
@@ -548,41 +635,31 @@ export default function App() {
     }
   };
 
-  // Auto-focus exam answer input when exam question index changes
+  // Handle Enter key in Exam Mode: first Enter grades the question; second Enter advances to next question
+  const handleExamKeyAction = () => {
+    if (!currentExamCard) return;
+    const isGraded = Boolean(examBatchValidations[currentExamCard.uid]);
+    if (!isGraded) {
+      gradeCurrentExamQuestion();
+    } else if (Date.now() - lastExamGradeTimeRef.current >= 150) {
+      advanceExamAfterGrading();
+    }
+  };
+
+  // Auto-focus exam answer input when exam question index changes to an ungraded question
   useEffect(() => {
-    if (activeSection === 'exam' && !examSubmitted && !examShowResults) {
+    if (
+      activeSection === 'exam' &&
+      !examShowResults &&
+      currentExamCard &&
+      !examBatchValidations[currentExamCard.uid]
+    ) {
       const timer = setTimeout(() => {
         examAnswerInputRef.current?.focus();
       }, 30);
       return () => clearTimeout(timer);
     }
-  }, [activeSection, examIndex, examSubmitted, examShowResults]);
-
-  // Global Enter listener when an exam question is already submitted so pressing Enter anywhere advances
-  useEffect(() => {
-    if (activeSection !== 'exam' || !examSubmitted || examShowResults) return;
-    const handleWindowKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        const activeTag = document.activeElement?.tagName.toLowerCase();
-        if (activeTag === 'textarea') return;
-        if (Date.now() - lastSubmitTimeRef.current < 150) return;
-        e.preventDefault();
-        advanceExamToNextOrFinish();
-      }
-    };
-    window.addEventListener('keydown', handleWindowKeyDown);
-    return () => window.removeEventListener('keydown', handleWindowKeyDown);
-  }, [
-    activeSection,
-    examSubmitted,
-    examShowResults,
-    examIndex,
-    activeExamCards.length,
-    currentExamCard,
-    examInput,
-    examVerseInput,
-    language
-  ]);
+  }, [activeSection, examIndex, examShowResults, currentExamCard, examBatchValidations]);
 
   // Filtered catalog questions
   const filteredCatalog = useMemo(() => {
@@ -636,9 +713,6 @@ export default function App() {
         <div className="flex-1 flex items-center justify-center">
           <div className="w-full max-w-xl bg-white border border-slate-200 rounded-2xl p-8 sm:p-10 text-center space-y-6">
             <div className="space-y-1.5">
-              <div className="text-xs font-mono-tabular text-slate-400">
-                99 Q&A · 10 DAILY
-              </div>
               <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
                 비유와 성구 시험 · Parábolas y Versículos
               </h1>
@@ -991,12 +1065,7 @@ export default function App() {
             type="button"
             onClick={() => {
               setActiveSection('exam');
-              setExamIndex(0);
-              setExamSubmitted(false);
-              setExamValidation(null);
-              setExamInput('');
-              setExamVerseInput('');
-              setExamShowResults(false);
+              startNewRandomExamSession(null);
             }}
             className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
               activeSection === 'exam'
@@ -1045,7 +1114,7 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Right Zone: "고급학습기능" Button with Hover Tooltip Popup */}
+        {/* Right Zone: "고급학습기능" Button */}
         <div className="flex items-center gap-2 shrink-0">
           {isAdvancedMode && (
             <button
@@ -1113,36 +1182,80 @@ export default function App() {
           </div>
         )}
 
-        {/* Minimal Summary Strip */}
+        {/* Minimal Summary Strip with Interactive Day Dropdown Selector */}
         <section className="mb-6 pb-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div>
-            <div className="text-xs text-slate-400 mb-1 font-mono-tabular">
+          <div ref={dayDropdownContainerRef} className="relative">
+            <div className="text-xs text-slate-400 mb-1.5 font-mono-tabular">
               {t.kickerSummary}
             </div>
-            <h1 className="font-display text-2xl font-bold text-slate-900 tracking-tight">
-              {isKo ? currentSchedule.titleKo : currentSchedule.titleEs}
-            </h1>
-          </div>
 
-          <div className="flex items-center gap-6 text-left">
-            <div>
-              <div className="text-xs text-slate-400">{t.statTodayComposition}</div>
-              <div className="text-base font-bold text-[#0284C7] font-mono-tabular">
-                {currentSchedule.newConceptIds.length} + {currentSchedule.reviewConceptCount}
-              </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Interactive "1일차" / "Día 1" Dropdown Button */}
+              <button
+                type="button"
+                onClick={() => setIsDayDropdownOpen((prev) => !prev)}
+                aria-expanded={isDayDropdownOpen}
+                className="px-3.5 py-2 rounded-xl bg-white border-2 border-[#0284C7] text-[#0284C7] hover:bg-[#0284C7]/[0.05] font-display text-lg sm:text-xl font-bold tracking-tight inline-flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+              >
+                <span>{t.dayDropdownBadge(selectedDay)}</span>
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform ${
+                    isDayDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                {isKo
+                  ? currentSchedule.titleKo.replace(/^\d+일차\s*·\s*/, '')
+                  : currentSchedule.titleEs.replace(/^Día\s*\d+\s*·\s*/, '')}
+              </h1>
             </div>
-            <div>
-              <div className="text-xs text-slate-400">{t.statMasteredConcepts}</div>
-              <div className="text-base font-bold text-[#059669] font-mono-tabular">
-                {masteredIds.length}/99
+
+            {/* Day Dropdown Menu (1일차 ~ 20일차 / Día 1 ~ Día 20) */}
+            {isDayDropdownOpen && (
+              <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 max-h-80 overflow-y-auto z-40 bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100 py-1">
+                {DAY_SCHEDULES.map((sched) => {
+                  const isSelected = sched.day === selectedDay;
+                  const isDone = completedDays.includes(sched.day);
+                  const subtitle = isKo
+                    ? sched.titleKo.replace(/^\d+일차\s*·\s*/, '')
+                    : sched.titleEs.replace(/^Día\s*\d+\s*·\s*/, '');
+
+                  return (
+                    <button
+                      key={sched.day}
+                      type="button"
+                      onClick={() => handleSelectDay(sched.day)}
+                      className={`w-full text-left px-4 py-2.5 text-xs transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#0284C7]/10 text-[#0284C7] font-bold'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`font-mono-tabular font-bold shrink-0 ${
+                            isSelected ? 'text-[#0284C7]' : 'text-slate-900'
+                          }`}
+                        >
+                          {t.dayDropdownBadge(sched.day)}
+                        </span>
+                        <span className="text-slate-500 font-mono-tabular truncate">
+                          {subtitle}
+                        </span>
+                      </div>
+
+                      {isDone && (
+                        <span className="text-[#059669] font-mono-tabular font-bold shrink-0">
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-400">{t.statBookmarkedConcepts}</div>
-              <div className="text-base font-bold text-[#D97706] font-mono-tabular">
-                {bookmarkedIds.length}
-              </div>
-            </div>
+            )}
           </div>
         </section>
 
@@ -1532,468 +1645,497 @@ export default function App() {
             )}
 
             {/* ============================================================== */}
-            {/* SECTION 2: 10-QUESTION EXAM MODE                               */}
+            {/* SECTION 2: 10-QUESTION EXAM MODE (IMMEDIATE GRADING ON ENTER)  */}
             {/* ============================================================== */}
             {activeSection === 'exam' && currentExamCard && (
               <>
-                <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-mono-tabular mb-0.5">
-                        <span>
-                          {examIndex + 1} / {activeExamCards.length}
-                        </span>
-                        <span>·</span>
-                        <span
-                          className={
-                            currentExamCard.origin === 'NEW'
-                              ? 'text-[#0284C7] font-semibold'
-                              : 'text-[#D97706] font-semibold'
-                          }
-                        >
-                          {currentExamCard.origin === 'NEW'
-                            ? t.tagNewConcept
-                            : t.tagReviewConcept}
-                        </span>
-                        {renderQuestionStatBadge(currentExamCard.question.id)}
-                      </div>
-                      <h2 className="font-display text-lg font-bold text-slate-900">
-                        {examMistakeUids
-                          ? `${t.examTitle(selectedDay)} · ${t.examReviewMistakesTitle}`
-                          : t.examTitle(selectedDay)}
-                      </h2>
-                    </div>
-
+                {/* Exam Reset Confirmation Banner (Shown only inside Exam Tab) */}
+                {examResetBannerVisible && (
+                  <div className="mb-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0284C7]/10 text-[#0284C7] rounded-lg text-xs font-bold font-mono-tabular">
-                        <Keyboard className="w-3.5 h-3.5" />
-                        <span>{t.examModeWritten}</span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExamShuffleOrder((prev) => !prev);
-                          setExamIndex(0);
-                          setExamSubmitted(false);
-                          setExamValidation(null);
-                          setExamInput('');
-                          setExamVerseInput('');
-                          setExamShowResults(false);
-                        }}
-                        className="px-3 py-1 text-xs font-medium border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
-                      >
-                        {examShuffleOrder ? t.examOriginalOrder : t.examShuffleOrder}
-                      </button>
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                      <span>{t.examResetDoneBanner}</span>
                     </div>
                   </div>
+                )}
 
-                  {/* Exam Question Prompt */}
-                  <div className="py-1 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-400">
-                        {currentExamCard.question.code}
+                {!examShowResults ? (
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+                    {/* Top 80-Point Pass Criteria Notice Banner */}
+                    <div className="rounded-xl bg-[#0284C7]/10 border border-[#0284C7]/30 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#0369A1]">
+                        <CheckCircle2 className="w-4 h-4 text-[#0284C7] shrink-0" />
+                        <span>{t.examTopPassNotice}</span>
+                      </div>
+                      <span className="text-[11px] font-medium text-slate-600">
+                        {t.examOneWayNotice}
                       </span>
-                      {!isKo && (
+                    </div>
+
+                    {/* Exam Header with Top-Right Exam Reset Button */}
+                    <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-200">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-mono-tabular mb-0.5">
+                          <span>
+                            {examIndex + 1} / {activeExamCards.length}
+                          </span>
+                          <span>·</span>
+                          <span
+                            className={
+                              currentExamCard.origin === 'NEW'
+                                ? 'text-[#0284C7] font-semibold'
+                                : 'text-[#D97706] font-semibold'
+                            }
+                          >
+                            {currentExamCard.origin === 'NEW'
+                              ? t.tagNewConcept
+                              : t.tagReviewConcept}
+                          </span>
+                          {renderQuestionStatBadge(currentExamCard.question.id)}
+                        </div>
+                        <h2 className="font-display text-lg font-bold text-slate-900">
+                          {examMistakeUids
+                            ? `${t.examTitle(selectedDay)} · ${t.examReviewMistakesTitle}`
+                            : t.examTitle(selectedDay)}
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {t.examOnePassGuide}
+                        </p>
+                      </div>
+
+                      {/* Top-Right Exam Controls: Exam Reset Button */}
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          onClick={() =>
-                            speakEcuadorSpanish(currentExamCard.question.questionEs)
-                          }
-                          className="text-xs font-medium text-[#0284C7] hover:underline flex items-center gap-1 cursor-pointer"
+                          onClick={handleResetExam}
+                          title={t.examResetBtnTooltip}
+                          className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200/80 hover:text-slate-900 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                         >
-                          <Volume2 className="w-3.5 h-3.5" />
-                          <span>{t.btnListenPromptEc}</span>
+                          <RotateCcw className="w-3.5 h-3.5 text-[#0284C7]" />
+                          <span>{t.examResetBtn}</span>
                         </button>
-                      )}
-                    </div>
-                    <p className="text-xl font-bold text-slate-900 leading-snug">
-                      {renderCardPrompt(currentExamCard)}
-                    </p>
-                  </div>
-
-                  {/* 100% Typing Exam Mode */}
-                  <div className="space-y-3">
-                    <div className="text-xs font-semibold text-[#0284C7]">
-                      {isSingleShortQuestion(currentExamCard.question.id)
-                        ? t.typingBadgeShort
-                        : t.typingBadgeKeywords}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                      <div className="sm:col-span-7">
-                        <input
-                          ref={examAnswerInputRef}
-                          type="text"
-                          value={examInput}
-                          onChange={(e) => {
-                            setExamInput(e.target.value);
-                            if (examSubmitted && !examValidation?.isCorrect) {
-                              setExamSubmitted(false);
-                              setExamValidation(null);
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (!examSubmitted) {
-                                submitCurrentExamCard();
-                              } else if (Date.now() - lastSubmitTimeRef.current >= 150) {
-                                advanceExamToNextOrFinish();
-                              }
-                            }
-                          }}
-                          placeholder={
-                            isSingleShortQuestion(currentExamCard.question.id)
-                              ? t.typingAnswerPlaceholderShort
-                              : t.typingAnswerPlaceholderKeywords
-                          }
-                          className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0284C7]"
-                        />
-                      </div>
-                      <div className="sm:col-span-5">
-                        <input
-                          type="text"
-                          value={examVerseInput}
-                          onChange={(e) => {
-                            setExamVerseInput(e.target.value);
-                            if (examSubmitted && !examValidation?.isCorrect) {
-                              setExamSubmitted(false);
-                              setExamValidation(null);
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (!examSubmitted) {
-                                submitCurrentExamCard();
-                              } else if (Date.now() - lastSubmitTimeRef.current >= 150) {
-                                advanceExamToNextOrFinish();
-                              }
-                            }
-                          }}
-                          placeholder={
-                            renderCardVerse(currentExamCard).trim() === '-'
-                              ? t.typingVerseNone
-                              : t.typingVersePlaceholder
-                          }
-                          disabled={renderCardVerse(currentExamCard).trim() === '-'}
-                          className="w-full px-3.5 py-2.5 text-sm font-mono-tabular bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0284C7] disabled:bg-slate-100"
-                        />
                       </div>
                     </div>
 
-                    {/* Exam Action Row: Submit + Activated Next Button */}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        {!examSubmitted ? (
+                    {/* 1-to-10 Non-Clickable One-Way Progress Stepper (Shows ✓ / ✕ as each question is graded) */}
+                    <div className="flex flex-wrap items-center gap-1.5" aria-label="Exam Progress">
+                      {activeExamCards.map((card, idx) => {
+                        const isCurrent = idx === examIndex;
+                        const gradedStatus = examResults[card.uid];
+                        return (
+                          <span
+                            key={card.uid}
+                            className={`w-8 h-8 rounded-lg text-xs font-mono-tabular font-bold inline-flex items-center justify-center select-none ${
+                              isCurrent
+                                ? 'bg-[#0284C7] text-white ring-2 ring-[#0284C7]/30'
+                                : gradedStatus === 'correct'
+                                  ? 'bg-emerald-100 text-[#059669] border border-emerald-300'
+                                  : gradedStatus === 'review_again'
+                                    ? 'bg-red-100 text-red-600 border border-red-300'
+                                    : 'bg-slate-100 text-slate-400'
+                            }`}
+                          >
+                            {gradedStatus === 'correct'
+                              ? '✓'
+                              : gradedStatus === 'review_again'
+                                ? '✕'
+                                : idx + 1}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    {/* Exam Question Prompt */}
+                    <div className="py-1 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-400">
+                          {currentExamCard.question.code}
+                        </span>
+                        {!isKo && (
                           <button
                             type="button"
-                            onClick={submitCurrentExamCard}
-                            className="px-4 py-2 text-xs font-semibold text-white bg-[#0284C7] rounded-lg hover:bg-[#0369A1] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                            onClick={() =>
+                              speakEcuadorSpanish(currentExamCard.question.questionEs)
+                            }
+                            className="text-xs font-medium text-[#0284C7] hover:underline flex items-center gap-1 cursor-pointer"
                           >
-                            {t.examSubmitAndCheck}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExamSubmitted(false);
-                              setExamValidation(null);
-                              setExamInput('');
-                              setExamVerseInput('');
-                              setTimeout(() => {
-                                examAnswerInputRef.current?.focus();
-                              }, 20);
-                            }}
-                            className="px-3.5 py-2 text-xs font-semibold border border-slate-200 bg-white rounded-lg text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
-                          >
-                            {t.btnRetryTyping}
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span>{t.btnListenPromptEc}</span>
                           </button>
                         )}
                       </div>
-
-                      <button
-                        type="button"
-                        disabled={!examSubmitted}
-                        onClick={advanceExamToNextOrFinish}
-                        className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1 whitespace-nowrap shrink-0 ${
-                          examSubmitted
-                            ? 'bg-[#059669] text-white hover:bg-[#047857] ring-2 ring-[#059669]/30 shadow-xs cursor-pointer'
-                            : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                        }`}
-                      >
-                        <span>
-                          {examIndex < activeExamCards.length - 1
-                            ? examSubmitted
-                              ? isKo
-                                ? `${t.examNextQuestion} (엔터 ↵)`
-                                : `${t.examNextQuestion} (Intro ↵)`
-                              : t.examNextQuestion
-                            : examSubmitted
-                              ? isKo
-                                ? `${t.examFinishBtn} (엔터 ↵)`
-                                : `${t.examFinishBtn} (Intro ↵)`
-                              : t.examFinishBtn}
-                        </span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
+                      <p className="text-xl font-bold text-slate-900 leading-snug">
+                        {renderCardPrompt(currentExamCard)}
+                      </p>
                     </div>
 
-                    {examSubmitted && (
-                      <div className="space-y-2.5">
-                        <div
-                          className={`rounded-xl border p-5 space-y-2.5 ${
-                            examValidation?.isCorrect
-                              ? 'bg-[#059669]/[0.05] border-[#059669]/40'
-                              : 'bg-slate-50 border-slate-200'
-                          }`}
-                        >
-                          {examValidation && (
-                            <div className="flex flex-wrap items-center justify-between gap-2">
+                    {/* Per-Question Immediate Grading Inputs (Locked once graded) */}
+                    {(() => {
+                      const currentDraft = getExamDraft(currentExamCard.uid);
+                      const currentValidation =
+                        examBatchValidations[currentExamCard.uid] || null;
+                      const isCurrentGraded = Boolean(currentValidation);
+                      const hasVerse =
+                        renderCardVerse(currentExamCard).trim() !== '-' &&
+                        renderCardVerse(currentExamCard).trim().length > 0;
+                      const isLastQuestion = examIndex >= activeExamCards.length - 1;
+
+                      return (
+                        <div className="space-y-3">
+                          <div className="text-xs font-semibold text-[#0284C7]">
+                            {isSingleShortQuestion(currentExamCard.question.id)
+                              ? t.typingBadgeShort
+                              : t.typingBadgeKeywords}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                            <div className={hasVerse ? 'sm:col-span-7' : 'sm:col-span-12'}>
+                              <input
+                                ref={examAnswerInputRef}
+                                type="text"
+                                value={currentDraft.answer}
+                                disabled={isCurrentGraded}
+                                readOnly={isCurrentGraded}
+                                onChange={(e) =>
+                                  updateExamDraftAnswer(
+                                    currentExamCard.uid,
+                                    e.target.value
+                                  )
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleExamKeyAction();
+                                  }
+                                }}
+                                placeholder={
+                                  isSingleShortQuestion(currentExamCard.question.id)
+                                    ? t.typingAnswerPlaceholderShort
+                                    : t.typingAnswerPlaceholderKeywords
+                                }
+                                className={`w-full px-3.5 py-2.5 text-sm border rounded-lg focus:outline-none ${
+                                  isCurrentGraded
+                                    ? 'bg-slate-100 text-slate-600 border-slate-300 cursor-not-allowed'
+                                    : 'bg-white border-slate-300 focus:border-[#0284C7]'
+                                }`}
+                              />
+                            </div>
+                            {hasVerse && (
+                              <div className="sm:col-span-5">
+                                <input
+                                  type="text"
+                                  value={currentDraft.verse}
+                                  disabled={isCurrentGraded}
+                                  readOnly={isCurrentGraded}
+                                  onChange={(e) =>
+                                    updateExamDraftVerse(
+                                      currentExamCard.uid,
+                                      e.target.value
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      handleExamKeyAction();
+                                    }
+                                  }}
+                                  placeholder={t.typingVersePlaceholder}
+                                  className={`w-full px-3.5 py-2.5 text-sm font-mono-tabular border rounded-lg focus:outline-none ${
+                                    isCurrentGraded
+                                      ? 'bg-slate-100 text-slate-600 border-slate-300 cursor-not-allowed'
+                                      : 'bg-white border-slate-300 focus:border-[#0284C7]'
+                                  }`}
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Exam Action Footer: Grade on Enter -> Then Advance on Enter (Strictly No Retry/Erase) */}
+                          <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                            <div className="text-xs font-mono-tabular text-slate-500">
+                              {examIndex + 1} / {activeExamCards.length}
+                            </div>
+
+                            {!isCurrentGraded ? (
+                              <button
+                                type="button"
+                                onClick={gradeCurrentExamQuestion}
+                                className="px-4 py-2 text-xs font-bold text-white bg-[#0284C7] hover:bg-[#0369A1] rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>
+                                  {isKo
+                                    ? `${t.examSubmitAndCheck} (엔터 ↵)`
+                                    : `${t.examSubmitAndCheck} (Intro ↵)`}
+                                </span>
+                              </button>
+                            ) : !isLastQuestion ? (
+                              <button
+                                ref={examNextActionBtnRef}
+                                type="button"
+                                onClick={advanceExamAfterGrading}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (Date.now() - lastExamGradeTimeRef.current >= 150) {
+                                      advanceExamAfterGrading();
+                                    }
+                                  }
+                                }}
+                                className="px-4 py-2 text-xs font-bold text-white bg-[#059669] hover:bg-[#047857] ring-2 ring-[#059669]/30 rounded-lg transition-all flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                <span>
+                                  {isKo
+                                    ? `${t.examNextQuestion} (엔터 ↵)`
+                                    : `${t.examNextQuestion} (Intro ↵)`}
+                                </span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <button
+                                ref={examNextActionBtnRef}
+                                type="button"
+                                onClick={advanceExamAfterGrading}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (Date.now() - lastExamGradeTimeRef.current >= 150) {
+                                      advanceExamAfterGrading();
+                                    }
+                                  }
+                                }}
+                                className="px-5 py-2.5 text-xs font-bold text-white bg-[#059669] hover:bg-[#047857] ring-2 ring-[#059669]/30 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                <Check className="w-4 h-4" />
+                                <span>
+                                  {isKo
+                                    ? `${t.examCheckAllBtn} (엔터 ↵)`
+                                    : `${t.examCheckAllBtn} (Intro ↵)`}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Immediate Per-Question Grading Feedback Box */}
+                          {isCurrentGraded && currentValidation && (
+                            <div className="space-y-2.5 pt-2">
                               <div
-                                className={`text-xs font-bold ${
-                                  examValidation.isCorrect
-                                    ? 'text-[#059669]'
-                                    : 'text-red-600'
+                                className={`rounded-xl border p-4 space-y-3 ${
+                                  currentValidation.isCorrect
+                                    ? 'bg-[#059669]/[0.06] border-[#059669]/40'
+                                    : 'bg-red-50/70 border-red-200'
                                 }`}
                               >
-                                {examValidation.isCorrect
-                                  ? t.typingResultCorrect
-                                  : t.typingResultWrong}
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span
+                                    className={`text-xs sm:text-sm font-bold ${
+                                      currentValidation.isCorrect
+                                        ? 'text-[#059669]'
+                                        : 'text-red-600'
+                                    }`}
+                                  >
+                                    {currentValidation.isCorrect
+                                      ? t.typingResultCorrect
+                                      : t.typingResultWrong}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={advanceExamAfterGrading}
+                                    className="px-3 py-1 text-xs font-bold text-white bg-[#059669] hover:bg-[#047857] rounded-md flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                                  >
+                                    <span>
+                                      {!isLastQuestion
+                                        ? isKo
+                                          ? `${t.examNextQuestion} (엔터 ↵)`
+                                          : `${t.examNextQuestion} (Intro ↵)`
+                                        : isKo
+                                          ? `${t.examCheckAllBtn} (엔터 ↵)`
+                                          : `${t.examCheckAllBtn} (Intro ↵)`}
+                                    </span>
+                                    <ChevronRight className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                {/* Detailed Wrong-Answer Breakdown: What user typed + Missing Keywords + Missing Verses + Lock Notice */}
+                                {!currentValidation.isCorrect && (
+                                  <div className="bg-white/90 border border-red-200/80 rounded-lg p-3 text-xs space-y-2 text-slate-700">
+                                    <div>
+                                      <span className="font-semibold text-slate-500 mr-1.5">
+                                        {t.examYourAnswerLabel}
+                                      </span>
+                                      <span className="font-mono-tabular text-slate-900 font-medium">
+                                        {currentDraft.answer.trim() ||
+                                        currentDraft.verse.trim()
+                                          ? `${currentDraft.answer || '-'} / ${
+                                              currentDraft.verse || '-'
+                                            }`
+                                          : t.examNoAnswerEntered}
+                                      </span>
+                                    </div>
+
+                                    {currentValidation.missingKeywords.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="font-bold text-red-600">
+                                          {t.typingMissingKeywords}
+                                        </span>
+                                        {currentValidation.missingKeywords.map((kw, i) => (
+                                          <span
+                                            key={i}
+                                            className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-mono-tabular font-bold"
+                                          >
+                                            {kw}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {currentValidation.missingVerses.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="font-bold text-red-600">
+                                          {t.typingMissingVerses}
+                                        </span>
+                                        {currentValidation.missingVerses.map((v, i) => (
+                                          <span
+                                            key={i}
+                                            className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-mono-tabular font-bold"
+                                          >
+                                            {v}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    <div className="pt-1.5 border-t border-red-100 text-[11px] font-semibold text-red-700">
+                                      {t.examLockedInputNotice}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Correct Model Answer & Key Verse */}
+                                <div className="pt-2 border-t border-slate-200/80 space-y-1">
+                                  <div className="text-xl font-bold text-[#0284C7]">
+                                    {renderCardAnswerMain(currentExamCard)}
+                                  </div>
+                                  <div className="text-xl font-bold text-[#0284C7] font-mono-tabular">
+                                    {t.labelKeyVerse}: {renderCardVerse(currentExamCard)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <VerseAndNoteSection
+                                question={currentExamCard.question}
+                                language={language}
+                                isAdvancedMode={isAdvancedMode}
+                                savedNote={studyNotes[currentExamCard.question.id] || ''}
+                                onSaveNote={handleSaveStudyNote}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  /* ========================================================== */
+                  /* BATCH GRADED EXAM RESULTS + PASS / FAIL BANNER             */
+                  /* ========================================================== */
+                  (() => {
+                    const totalCount = activeExamCards.length;
+                    const correctCards = activeExamCards.filter(
+                      (c) => examResults[c.uid] === 'correct'
+                    );
+                    const wrongCards = activeExamCards.filter(
+                      (c) => examResults[c.uid] !== 'correct'
+                    );
+                    const correctCount = correctCards.length;
+                    const wrongCount = wrongCards.length;
+                    const finalPercent =
+                      totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
+                    const isPassed = finalPercent >= 80;
+
+                    return (
+                      <div className="space-y-5">
+                        {/* PASS / FAIL HERO BANNER */}
+                        {isPassed ? (
+                          <div className="rounded-2xl border-2 border-[#059669] bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6 sm:p-8 shadow-sm text-center space-y-3">
+                            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold bg-[#059669] text-white">
+                              <span>{t.examPassBadge}</span>
+                            </div>
+                            <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-[#047857] tracking-tight">
+                              {t.examPassHeadline}
+                            </h2>
+                            <p className="text-sm font-medium text-emerald-800">
+                              {t.examPassSubtext}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border-2 border-red-600 bg-gradient-to-br from-red-950 via-red-900 to-slate-900 text-white p-6 sm:p-8 shadow-lg space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-extrabold bg-red-600 text-white uppercase tracking-wider">
+                                <AlertTriangle className="w-4 h-4 shrink-0" />
+                                <span>{t.examFailBadge}</span>
+                              </span>
+                              <span className="text-xs font-mono-tabular text-red-200 font-semibold">
+                                {t.examFailWarningLabel}
+                              </span>
+                            </div>
+
+                            <blockquote className="p-4 sm:p-5 rounded-xl bg-black/35 border-l-4 border-amber-400 space-y-2">
+                              <p className="text-base sm:text-lg font-bold text-amber-100 leading-relaxed">
+                                {t.examFailVerseText}
+                              </p>
+                              <footer className="text-xs sm:text-sm font-mono-tabular font-bold text-amber-300 text-right">
+                                {t.examFailVerseRef}
+                              </footer>
+                            </blockquote>
+                          </div>
+                        )}
+
+                        {/* Score Summary Card */}
+                        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+                          <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-slate-200">
+                            <div>
+                              <div className="text-xs font-mono-tabular text-slate-400">
+                                {t.examPassCriteriaNotice}
+                              </div>
+                              <h3 className="font-display text-xl font-bold text-slate-900 mt-0.5">
+                                {t.examResultsTitle(selectedDay)}
+                              </h3>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <div className="text-xs text-slate-400">
+                                  {t.examFinalScoreLabel}
+                                </div>
+                                <div
+                                  className={`font-mono-tabular text-2xl font-bold ${
+                                    isPassed ? 'text-[#059669]' : 'text-red-600'
+                                  }`}
+                                >
+                                  {finalPercent}%{' '}
+                                  <span className="text-sm text-slate-500 font-normal">
+                                    ({correctCount}/{totalCount})
+                                  </span>
+                                </div>
                               </div>
 
                               <button
                                 type="button"
-                                onClick={advanceExamToNextOrFinish}
-                                className="px-3.5 py-1.5 text-xs font-bold text-white bg-[#0284C7] hover:bg-[#0369A1] rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                                onClick={handleResetExam}
+                                title={t.examResetBtnTooltip}
+                                className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200/80 hover:text-slate-900 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                               >
-                                <span>
-                                  {examIndex < activeExamCards.length - 1
-                                    ? isKo
-                                      ? `${t.examNextQuestion} (엔터 ↵)`
-                                      : `${t.examNextQuestion} (Intro ↵)`
-                                    : isKo
-                                      ? `${t.examFinishBtn} (엔터 ↵)`
-                                      : `${t.examFinishBtn} (Intro ↵)`}
-                                </span>
-                                <ChevronRight className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-
-                          {examValidation && !examValidation.isCorrect && (
-                            <div className="text-xs space-y-1 text-slate-700">
-                              {examValidation.missingKeywords.length > 0 && (
-                                <div>
-                                  <span className="font-semibold text-red-600 mr-1.5">
-                                    {t.typingMissingKeywords}
-                                  </span>
-                                  <span className="font-mono-tabular">
-                                    {examValidation.missingKeywords.join(', ')}
-                                  </span>
-                                </div>
-                              )}
-                              {examValidation.missingVerses.length > 0 && (
-                                <div>
-                                  <span className="font-semibold text-red-600 mr-1.5">
-                                    {t.typingMissingVerses}
-                                  </span>
-                                  <span className="font-mono-tabular">
-                                    {examValidation.missingVerses.join(', ')}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="text-xl font-bold text-[#0284C7]">
-                            {renderCardAnswerMain(currentExamCard)}
-                          </div>
-                          <div className="text-xl font-bold text-[#0284C7] font-mono-tabular">
-                            {t.labelKeyVerse}: {renderCardVerse(currentExamCard)}
-                          </div>
-
-                          {!isKo && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                speakEcuadorSpanish(currentExamCard.question.answerEs)
-                              }
-                              className="px-2.5 py-1 text-xs font-medium border border-slate-200 bg-white rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
-                            >
-                              <Volume2 className="w-3.5 h-3.5 text-[#059669]" />
-                              <span>{t.btnListenAnswerEc}</span>
-                            </button>
-                          )}
-
-                          <div className="pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-xs text-slate-500 mr-1">
-                                {t.examSelfGradeLabel}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setExamResults((prev) => ({
-                                    ...prev,
-                                    [currentExamCard.uid]: 'correct'
-                                  }));
-                                  if (!masteredIds.includes(currentExamCard.question.id)) {
-                                    toggleMastered(currentExamCard.question.id);
-                                  }
-                                }}
-                                className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                                  examResults[currentExamCard.uid] === 'correct'
-                                    ? 'bg-[#059669] text-white border-[#059669]'
-                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                }`}
-                              >
-                                {t.examGradePass}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setExamResults((prev) => ({
-                                    ...prev,
-                                    [currentExamCard.uid]: 'review_again'
-                                  }));
-                                  if (!bookmarkedIds.includes(currentExamCard.question.id)) {
-                                    toggleBookmark(currentExamCard.question.id);
-                                  }
-                                }}
-                                className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                                  examResults[currentExamCard.uid] === 'review_again'
-                                    ? 'bg-[#D97706] text-white border-[#D97706]'
-                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                }`}
-                              >
-                                {t.examGradeReview}
+                                <RotateCcw className="w-3.5 h-3.5 text-[#0284C7]" />
+                                <span>{t.examResetBtn}</span>
                               </button>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Full Bible Verse Text (개역한글판 / Reina-Valera 1960) + Advanced Study Tip Note */}
-                        <VerseAndNoteSection
-                          question={currentExamCard.question}
-                          language={language}
-                          isAdvancedMode={isAdvancedMode}
-                          savedNote={studyNotes[currentExamCard.question.id] || ''}
-                          onSaveNote={handleSaveStudyNote}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Exam Navigation Footer */}
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-200">
-                    <button
-                      type="button"
-                      disabled={examIndex === 0}
-                      onClick={() => {
-                        setExamIndex((i) => Math.max(0, i - 1));
-                        setExamSubmitted(false);
-                        setExamValidation(null);
-                        setExamInput('');
-                        setExamVerseInput('');
-                      }}
-                      className="px-3.5 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer"
-                    >
-                      {t.examPrevQuestion}
-                    </button>
-
-                    <div className="text-xs font-mono-tabular text-slate-500">
-                      {t.examScoreSummary(
-                        activeExamCards.filter(
-                          (c) => examResults[c.uid] === 'correct'
-                        ).length,
-                        activeExamCards.filter(
-                          (c) => examResults[c.uid] === 'review_again'
-                        ).length,
-                        activeExamCards.length
-                      )}
-                    </div>
-
-                    {examIndex < activeExamCards.length - 1 ? (
-                      <button
-                        type="button"
-                        onClick={advanceExamToNextOrFinish}
-                        className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                          examSubmitted
-                            ? 'text-white bg-[#059669] hover:bg-[#047857] ring-2 ring-[#059669]/30'
-                            : 'text-white bg-[#0284C7] hover:bg-[#0369A1]'
-                        }`}
-                      >
-                        {examSubmitted
-                          ? isKo
-                            ? `${t.examNextQuestion} (엔터 ↵)`
-                            : `${t.examNextQuestion} (Intro ↵)`
-                          : t.examNextQuestion}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={advanceExamToNextOrFinish}
-                        className="px-4 py-1.5 text-xs font-bold text-white bg-[#059669] rounded-lg hover:bg-[#047857] whitespace-nowrap shrink-0 cursor-pointer"
-                      >
-                        {examSubmitted
-                          ? isKo
-                            ? `${t.examFinishBtn} (엔터 ↵)`
-                            : `${t.examFinishBtn} (Intro ↵)`
-                          : t.examFinishBtn}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* EXAM RESULTS MODAL POPUP */}
-                {examShowResults && (() => {
-                  const totalCount = activeExamCards.length;
-                  const correctCards = activeExamCards.filter(
-                    (c) => examResults[c.uid] === 'correct'
-                  );
-                  const wrongCards = activeExamCards.filter(
-                    (c) => examResults[c.uid] !== 'correct'
-                  );
-                  const correctCount = correctCards.length;
-                  const wrongCount = wrongCards.length;
-                  const finalPercent =
-                    totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
-
-                  return (
-                    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-                      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-xl">
-                        {/* Modal Header */}
-                        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                          <div>
-                            <div className="text-xs font-mono-tabular text-slate-400">
-                              {examMistakeUids
-                                ? t.examReviewMistakesTitle
-                                : `${totalCount} Q&A`}
-                            </div>
-                            <h3 className="font-display text-xl font-bold text-slate-900">
-                              {t.examResultsTitle(selectedDay)}
-                            </h3>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-slate-400">
-                              {t.examFinalScoreLabel}
-                            </div>
-                            <div className="font-mono-tabular text-2xl font-bold text-[#0284C7]">
-                              {finalPercent}%{' '}
-                              <span className="text-sm text-slate-500 font-normal">
-                                ({correctCount}/{totalCount})
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="p-6 overflow-y-auto space-y-5">
-                          {/* Correct / Incorrect Summary Cards */}
                           <div className="grid grid-cols-2 gap-3">
                             <div className="p-4 rounded-xl border border-[#059669]/30 bg-[#059669]/[0.05]">
                               <div className="text-xs font-semibold text-[#059669]">
@@ -2003,112 +2145,188 @@ export default function App() {
                                 {correctCount}
                               </div>
                             </div>
-                            <div className="p-4 rounded-xl border border-[#D97706]/30 bg-[#D97706]/[0.05]">
-                              <div className="text-xs font-semibold text-[#D97706]">
+                            <div className="p-4 rounded-xl border border-red-200 bg-red-50/60">
+                              <div className="text-xs font-semibold text-red-600">
                                 {t.examWrongCountLabel}
                               </div>
-                              <div className="mt-1 font-mono-tabular text-2xl font-bold text-[#D97706]">
+                              <div className="mt-1 font-mono-tabular text-2xl font-bold text-red-600">
                                 {wrongCount}
                               </div>
                             </div>
                           </div>
 
-                          {/* Mistakes List or Perfect Score Message */}
-                          {wrongCount === 0 ? (
-                            <div className="p-6 rounded-xl border border-[#059669]/30 bg-[#059669]/[0.04] text-center space-y-1">
-                              <div className="text-lg font-bold text-[#059669]">
-                                {t.examPerfectScoreMsg}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-2.5">
-                              <div className="text-xs font-bold text-slate-500">
-                                {t.examMistakesListTitle} ({wrongCount})
-                              </div>
-                              <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-                                {wrongCards.map((card) => (
-                                  <div
-                                    key={card.uid}
-                                    className="p-4 bg-white space-y-1.5"
-                                  >
-                                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono-tabular">
-                                      <span>{card.question.code}</span>
-                                      <span className="text-[#D97706] font-semibold">
-                                        {t.examWrongBadge}
-                                      </span>
-                                    </div>
-                                    <div className="text-sm font-bold text-slate-900">
-                                      {renderCardPrompt(card)}
-                                    </div>
-                                    <div className="text-xl font-bold text-[#0284C7]">
-                                      {renderCardAnswerMain(card)}
-                                    </div>
-                                    <div className="text-xl font-bold text-[#0284C7] font-mono-tabular">
-                                      {t.labelKeyVerse}: {renderCardVerse(card)}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Modal Footer Actions */}
-                        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExamShowResults(false);
-                              setActiveSection('study');
-                            }}
-                            className="px-3.5 py-2 text-xs font-semibold border border-slate-300 bg-white rounded-lg text-slate-700 hover:bg-slate-100 whitespace-nowrap shrink-0 cursor-pointer"
-                          >
-                            {t.examBackToStudyBtn}
-                          </button>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            {wrongCount > 0 && (
+                          {/* Exam Retry (Random Order) & Back to Study Actions */}
+                          <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const missedUids = wrongCards.map((c) => c.uid);
-                                  setExamMistakeUids(missedUids);
-                                  setExamResults({});
-                                  setExamIndex(0);
-                                  setExamSubmitted(false);
-                                  setExamValidation(null);
-                                  setExamInput('');
-                                  setExamVerseInput('');
-                                  setExamShowResults(false);
-                                }}
-                                className="px-4 py-2 text-xs font-bold text-white bg-[#D97706] rounded-lg hover:bg-[#B45309] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                                onClick={() => startNewRandomExamSession(null)}
+                                className="px-4 py-2 text-xs font-bold text-white bg-[#0284C7] hover:bg-[#0369A1] rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                               >
-                                {t.examReviewMistakesBtn(wrongCount)}
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>{t.examRetryAllBtn}</span>
                               </button>
-                            )}
+
+                              {wrongCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    startNewRandomExamSession(
+                                      wrongCards.map((c) => c.uid)
+                                    )
+                                  }
+                                  className="px-4 py-2 text-xs font-bold text-[#D97706] bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                                >
+                                  <Shuffle className="w-3.5 h-3.5" />
+                                  <span>{t.examReviewMistakesBtn(wrongCount)}</span>
+                                </button>
+                              )}
+                            </div>
 
                             <button
                               type="button"
                               onClick={() => {
-                                setExamMistakeUids(null);
-                                setExamResults({});
-                                setExamIndex(0);
-                                setExamSubmitted(false);
-                                setExamValidation(null);
-                                setExamInput('');
-                                setExamVerseInput('');
                                 setExamShowResults(false);
+                                setActiveSection('study');
                               }}
-                              className="px-4 py-2 text-xs font-bold text-white bg-[#0284C7] rounded-lg hover:bg-[#0369A1] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                              className="px-4 py-2 text-xs font-semibold border border-slate-300 bg-white rounded-lg text-slate-700 hover:bg-slate-100 whitespace-nowrap shrink-0 cursor-pointer"
                             >
-                              {t.examRetryAllBtn}
+                              {t.examBackToStudyBtn}
                             </button>
                           </div>
                         </div>
+
+                        {/* Full Question-by-Question Review with Original Bible Verses & Study Tip Notes */}
+                        <div className="space-y-3">
+                          <h4 className="font-display text-sm font-bold text-slate-700 px-1">
+                            {t.examAllQuestionsReviewTitle}
+                          </h4>
+
+                          {activeExamCards.map((card, idx) => {
+                            const draft = getExamDraft(card.uid);
+                            const validation = examBatchValidations[card.uid];
+                            const isCorrect = examResults[card.uid] === 'correct';
+                            const isBookmarked = bookmarkedIds.includes(card.question.id);
+
+                            return (
+                              <div
+                                key={card.uid}
+                                className={`bg-white border rounded-xl p-5 space-y-3 ${
+                                  isCorrect ? 'border-emerald-200' : 'border-red-200'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs font-mono-tabular">
+                                    <span className="font-bold text-slate-900">
+                                      {String(idx + 1).padStart(2, '0')}.{' '}
+                                      {card.question.code}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-0.5 rounded font-bold ${
+                                        isCorrect
+                                          ? 'bg-emerald-50 text-[#059669]'
+                                          : 'bg-red-50 text-red-600'
+                                      }`}
+                                    >
+                                      {isCorrect ? t.examCorrectBadge : t.examWrongBadge}
+                                    </span>
+                                    {renderQuestionStatBadge(card.question.id)}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5">
+                                    {!isKo && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          speakEcuadorSpanish(card.question.answerEs)
+                                        }
+                                        className="px-2 py-1 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                                      >
+                                        <Volume2 className="w-3.5 h-3.5 text-[#059669]" />
+                                        <span>{t.btnListenAnswerEc}</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleBookmark(card.question.id)}
+                                      className={`px-2.5 py-1 text-xs font-medium border rounded-md transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
+                                        isBookmarked
+                                          ? 'border-[#D97706] bg-[#D97706]/10 text-[#D97706]'
+                                          : 'border-slate-200 text-slate-500 hover:text-slate-900'
+                                      }`}
+                                    >
+                                      <Bookmark className="w-3.5 h-3.5" />
+                                      <span>{t.btnBookmark}</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="text-base font-bold text-slate-900">
+                                  {renderCardPrompt(card)}
+                                </div>
+
+                                {/* User's Submitted Answer */}
+                                <div className="text-xs bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1">
+                                  <div className="font-semibold text-slate-500">
+                                    {t.examYourAnswerLabel}
+                                  </div>
+                                  <div className="font-mono-tabular text-slate-800">
+                                    {draft.answer.trim() || draft.verse.trim()
+                                      ? `${draft.answer || '-'} / ${draft.verse || '-'}`
+                                      : t.examNoAnswerEntered}
+                                  </div>
+                                  {validation && !validation.isCorrect && (
+                                    <div className="pt-1 space-y-0.5 text-slate-700">
+                                      {validation.missingKeywords.length > 0 && (
+                                        <div>
+                                          <span className="font-semibold text-red-600 mr-1.5">
+                                            {t.typingMissingKeywords}
+                                          </span>
+                                          <span className="font-mono-tabular">
+                                            {validation.missingKeywords.join(', ')}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {validation.missingVerses.length > 0 && (
+                                        <div>
+                                          <span className="font-semibold text-red-600 mr-1.5">
+                                            {t.typingMissingVerses}
+                                          </span>
+                                          <span className="font-mono-tabular">
+                                            {validation.missingVerses.join(', ')}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Correct Model Answer */}
+                                <div className="pt-1 space-y-1">
+                                  <div className="text-xl font-bold text-[#0284C7]">
+                                    {renderCardAnswerMain(card)}
+                                  </div>
+                                  <div className="text-xl font-bold text-[#0284C7] font-mono-tabular">
+                                    {t.labelKeyVerse}: {renderCardVerse(card)}
+                                  </div>
+                                </div>
+
+                                {/* Full Bible Verse Text (개역한글판 / Reina-Valera 1960) + Advanced Study Tip Note */}
+                                <VerseAndNoteSection
+                                  question={card.question}
+                                  language={language}
+                                  isAdvancedMode={isAdvancedMode}
+                                  savedNote={studyNotes[card.question.id] || ''}
+                                  onSaveNote={handleSaveStudyNote}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()
+                )}
               </>
             )}
 
@@ -2166,18 +2384,10 @@ export default function App() {
                     onChange={(e) => setCatalogStatusFilter(e.target.value as any)}
                     className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-700"
                   >
-                    <option value="all">
-                      {t.catalogFilterAll} ({QUESTIONS.length})
-                    </option>
-                    <option value="bookmarked">
-                      {t.catalogFilterBookmarked} ({bookmarkedIds.length})
-                    </option>
-                    <option value="mastered">
-                      {t.catalogFilterMastered} ({masteredIds.length})
-                    </option>
-                    <option value="unmastered">
-                      {t.catalogFilterUnmastered} ({99 - masteredIds.length})
-                    </option>
+                    <option value="all">{t.catalogFilterAll}</option>
+                    <option value="bookmarked">{t.catalogFilterBookmarked}</option>
+                    <option value="mastered">{t.catalogFilterMastered}</option>
+                    <option value="unmastered">{t.catalogFilterUnmastered}</option>
                   </select>
                 </div>
 
@@ -2279,10 +2489,19 @@ export default function App() {
           <aside className="lg:col-span-4 space-y-4">
             {/* Day Summary & Reroll Card */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-sm font-bold text-slate-900">
-                  {t.sidebarDayController(selectedDay)}
-                </h2>
+              <div className="flex items-center justify-between gap-2">
+                <select
+                  value={selectedDay}
+                  onChange={(e) => handleSelectDay(Number(e.target.value))}
+                  aria-label={t.statCurrentDay}
+                  className="font-display text-sm font-bold text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#0284C7] cursor-pointer"
+                >
+                  {DAY_SCHEDULES.map((sched) => (
+                    <option key={sched.day} value={sched.day}>
+                      {t.sidebarDayController(sched.day)}
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   onClick={() => toggleCompleteDay(selectedDay)}
@@ -2364,104 +2583,101 @@ export default function App() {
               )}
             </div>
 
-            {/* 20-Day Schedule Selector */}
+            {/* 20-Day Schedule Selector (Collapsed by default, expandable with down arrow) */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIsCurriculumOpen((prev) => !prev)}
+                aria-expanded={isCurriculumOpen}
+                title={
+                  isCurriculumOpen ? t.curriculumCollapseBtn : t.curriculumExpandBtn
+                }
+                className="w-full flex items-center justify-between text-left group cursor-pointer"
+              >
                 <div>
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <h3 className="font-display text-sm font-bold text-slate-900 group-hover:text-[#0284C7] transition-colors">
                     {t.curriculumTitle}
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     {t.curriculumSubtitle}
                   </p>
                 </div>
-                <span className="text-xs font-mono-tabular font-semibold text-[#059669]">
-                  {completedDays.length}/20
-                </span>
-              </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-mono-tabular font-semibold text-[#059669]">
+                    {completedDays.length}/20
+                  </span>
+                  <span className="p-1 rounded-md bg-slate-100 text-slate-600 group-hover:bg-[#0284C7]/10 group-hover:text-[#0284C7] transition-colors">
+                    {isCurriculumOpen ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                  </span>
+                </div>
+              </button>
 
-              <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
-                {DAY_SCHEDULES.map((sched) => {
-                  const isSelected = sched.day === selectedDay;
-                  const isDone = completedDays.includes(sched.day);
-                  const newRangeText =
-                    sched.newConceptIds.length > 0
-                      ? `Q${sched.newConceptIds[0]}~Q${
-                          sched.newConceptIds[sched.newConceptIds.length - 1]
-                        }`
-                      : t.labelAllRangeReview;
-                  const revRangeText =
-                    sched.reviewConceptCount > 0
-                      ? isKo
-                        ? `+ 복습 ${sched.reviewConceptCount}`
-                        : `+ Repaso ${sched.reviewConceptCount}`
-                      : '';
+              {isCurriculumOpen && (
+                <>
+                  <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
+                    {DAY_SCHEDULES.map((sched) => {
+                      const isSelected = sched.day === selectedDay;
+                      const isDone = completedDays.includes(sched.day);
+                      const newRangeText =
+                        sched.newConceptIds.length > 0
+                          ? `Q${sched.newConceptIds[0]}~Q${
+                              sched.newConceptIds[sched.newConceptIds.length - 1]
+                            }`
+                          : t.labelAllRangeReview;
+                      const revRangeText =
+                        sched.reviewConceptCount > 0
+                          ? isKo
+                            ? `+ 복습 ${sched.reviewConceptCount}`
+                            : `+ Repaso ${sched.reviewConceptCount}`
+                          : '';
 
-                  return (
-                    <button
-                      key={sched.day}
-                      type="button"
-                      onClick={() => {
-                        setSelectedDay(sched.day);
-                        setFocusCardIndex(0);
-                        setExamIndex(0);
-                        setExamSubmitted(false);
-                        setExamValidation(null);
-                        setExamInput('');
-                        setExamVerseInput('');
-                        setExamShowResults(false);
-                        setExamMistakeUids(null);
-                        setExamResults({});
-                      }}
-                      className={`w-full text-left px-3 py-2 transition-colors flex items-center justify-between gap-2 cursor-pointer ${
-                        isSelected ? 'bg-[#0284C7]/10' : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`text-xs font-mono-tabular font-bold ${
-                            isSelected ? 'text-[#0284C7]' : 'text-slate-900'
+                      return (
+                        <button
+                          key={sched.day}
+                          type="button"
+                          onClick={() => {
+                            setSelectedDay(sched.day);
+                            setFocusCardIndex(0);
+                            startNewRandomExamSession(null);
+                          }}
+                          className={`w-full text-left px-3 py-2 transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                            isSelected ? 'bg-[#0284C7]/10' : 'hover:bg-slate-50'
                           }`}
                         >
-                          {isKo
-                            ? `${String(sched.day).padStart(2, '0')}일차`
-                            : `Día ${String(sched.day).padStart(2, '0')}`}
-                        </span>
-                        <span className="text-xs text-slate-600 font-mono-tabular truncate">
-                          {newRangeText} {revRangeText}
-                        </span>
-                      </div>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className={`text-xs font-mono-tabular font-bold ${
+                                isSelected ? 'text-[#0284C7]' : 'text-slate-900'
+                              }`}
+                            >
+                              {isKo
+                                ? `${String(sched.day).padStart(2, '0')}일차`
+                                : `Día ${String(sched.day).padStart(2, '0')}`}
+                            </span>
+                            <span className="text-xs text-slate-600 font-mono-tabular truncate">
+                              {newRangeText} {revRangeText}
+                            </span>
+                          </div>
 
-                      {isDone && (
-                        <span className="text-xs font-mono-tabular font-semibold text-[#059669] shrink-0">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                          {isDone && (
+                            <span className="text-xs font-mono-tabular font-semibold text-[#059669] shrink-0">
+                              ✓
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              <div className="pt-1 flex items-center justify-between text-[11px] text-slate-400">
-                <span>{t.autoSaveNote}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCompletedDays([]);
-                    setMasteredIds([]);
-                    setBookmarkedIds([]);
-                    setDailyReviews({});
-                    setTypingEntries({});
-                    setRevealStageByUid({});
-                    setCatalogStageById({});
-                    setSelectedDay(1);
-                  }}
-                  className="text-slate-400 hover:text-red-600 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>{t.btnResetProgress}</span>
-                </button>
-              </div>
+                  <div className="pt-1 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>{t.autoSaveNote}</span>
+                  </div>
+                </>
+              )}
             </div>
           </aside>
         </div>
