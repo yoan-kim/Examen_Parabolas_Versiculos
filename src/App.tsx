@@ -72,6 +72,11 @@ interface ExamDraftEntry {
   verse: string;
 }
 
+interface BestScoresByLanguage {
+  ko: Record<number, number>;
+  es: Record<number, number>;
+}
+
 function shuffleCardsRandomly<T>(items: T[]): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -147,6 +152,23 @@ export default function App() {
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
+    }
+  });
+
+  // Cumulative Best Exam Scores per Language (ko / es) and per Session/Day (1..20)
+  const [bestScoresByLang, setBestScoresByLang] = useState<BestScoresByLanguage>(() => {
+    try {
+      const saved = localStorage.getItem('parabolas99_v2_best_scores_by_lang');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ko: parsed?.ko || {},
+          es: parsed?.es || {}
+        };
+      }
+      return { ko: {}, es: {} };
+    } catch {
+      return { ko: {}, es: {} };
     }
   });
 
@@ -237,6 +259,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('parabolas99_v2_completed_days', JSON.stringify(completedDays));
   }, [completedDays]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      'parabolas99_v2_best_scores_by_lang',
+      JSON.stringify(bestScoresByLang)
+    );
+  }, [bestScoresByLang]);
 
   useEffect(() => {
     localStorage.setItem('parabolas99_v2_mastered_ids', JSON.stringify(masteredIds));
@@ -587,6 +616,27 @@ export default function App() {
     });
   };
 
+  // Accumulate and persist the highest exam score for a given language and day (1..20)
+  const recordDayBestScore = (lang: AppLanguage, day: number, scorePercent: number) => {
+    setBestScoresByLang((prev) => {
+      const currentLangScores = prev[lang] || {};
+      const existingBest = currentLangScores[day];
+      if (existingBest !== undefined && existingBest >= scorePercent) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [lang]: {
+          ...currentLangScores,
+          [day]: scorePercent
+        }
+      };
+    });
+    if (scorePercent >= 80) {
+      setCompletedDays((prev) => (prev.includes(day) ? prev : [...prev, day]));
+    }
+  };
+
   // Grade the current exam question immediately on Enter, lock inputs, and show right/wrong details
   const gradeCurrentExamQuestion = () => {
     if (!language || !currentExamCard) return;
@@ -601,20 +651,34 @@ export default function App() {
       language
     );
 
+    const nextResults: Record<string, 'correct' | 'review_again'> = {
+      ...examResults,
+      [currentExamCard.uid]: res.isCorrect ? 'correct' : 'review_again'
+    };
+
     setExamBatchValidations((prev) => ({
       ...prev,
       [currentExamCard.uid]: res
     }));
-    setExamResults((prev) => ({
-      ...prev,
-      [currentExamCard.uid]: res.isCorrect ? 'correct' : 'review_again'
-    }));
+    setExamResults(nextResults);
     handleRecordQuestionAttempt(currentExamCard.question.id, res.isCorrect);
 
     if (res.isCorrect && !masteredIds.includes(currentExamCard.question.id)) {
       setMasteredIds((prev) => [...prev, currentExamCard.question.id]);
     } else if (!res.isCorrect && !bookmarkedIds.includes(currentExamCard.question.id)) {
       setBookmarkedIds((prev) => [...prev, currentExamCard.question.id]);
+    }
+
+    // If all questions of the full day exam have now been graded, immediately update cumulative best score
+    if (!examMistakeUids && activeExamCards.length > 0) {
+      const gradedCount = activeExamCards.filter((c) => Boolean(nextResults[c.uid])).length;
+      if (gradedCount === activeExamCards.length) {
+        const correctCount = activeExamCards.filter(
+          (c) => nextResults[c.uid] === 'correct'
+        ).length;
+        const scorePercent = Math.round((correctCount / activeExamCards.length) * 100);
+        recordDayBestScore(language, selectedDay, scorePercent);
+      }
     }
 
     setTimeout(() => {
@@ -631,6 +695,13 @@ export default function App() {
         examAnswerInputRef.current?.focus();
       }, 30);
     } else {
+      if (language && !examMistakeUids && activeExamCards.length > 0) {
+        const correctCount = activeExamCards.filter(
+          (c) => examResults[c.uid] === 'correct'
+        ).length;
+        const scorePercent = Math.round((correctCount / activeExamCards.length) * 100);
+        recordDayBestScore(language, selectedDay, scorePercent);
+      }
       setExamShowResults(true);
     }
   };
@@ -771,6 +842,7 @@ export default function App() {
   // ============================================================================
   const isKo = language === 'ko';
   const t = UI_STRINGS[language];
+  const currentLangBestScores = bestScoresByLang[language] || {};
   const currentFocusCard =
     filteredStudyCards[
       Math.min(focusCardIndex, Math.max(0, filteredStudyCards.length - 1))
@@ -1198,6 +1270,18 @@ export default function App() {
                 className="px-3.5 py-2 rounded-xl bg-white border-2 border-[#0284C7] text-[#0284C7] hover:bg-[#0284C7]/[0.05] font-display text-lg sm:text-xl font-bold tracking-tight inline-flex items-center gap-2 shadow-xs transition-all cursor-pointer"
               >
                 <span>{t.dayDropdownBadge(selectedDay)}</span>
+                {typeof currentLangBestScores[selectedDay] === 'number' && (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono-tabular font-bold ${
+                      currentLangBestScores[selectedDay] >= 80
+                        ? 'bg-emerald-50 text-[#059669]'
+                        : 'bg-amber-50 text-[#D97706]'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t.sessionBestScore(currentLangBestScores[selectedDay])}</span>
+                  </span>
+                )}
                 <ChevronDown
                   className={`w-4 h-4 transition-transform ${
                     isDayDropdownOpen ? 'rotate-180' : ''
@@ -1214,10 +1298,11 @@ export default function App() {
 
             {/* Day Dropdown Menu (1일차 ~ 20일차 / Día 1 ~ Día 20) */}
             {isDayDropdownOpen && (
-              <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 max-h-80 overflow-y-auto z-40 bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100 py-1">
+              <div className="absolute left-0 top-full mt-2 w-80 sm:w-96 max-h-80 overflow-y-auto z-40 bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100 py-1">
                 {DAY_SCHEDULES.map((sched) => {
                   const isSelected = sched.day === selectedDay;
-                  const isDone = completedDays.includes(sched.day);
+                  const bestScore = currentLangBestScores[sched.day];
+                  const hasTaken = typeof bestScore === 'number';
                   const subtitle = isKo
                     ? sched.titleKo.replace(/^\d+일차\s*·\s*/, '')
                     : sched.titleEs.replace(/^Día\s*\d+\s*·\s*/, '');
@@ -1246,9 +1331,18 @@ export default function App() {
                         </span>
                       </div>
 
-                      {isDone && (
-                        <span className="text-[#059669] font-mono-tabular font-bold shrink-0">
-                          ✓
+                      {hasTaken ? (
+                        <span
+                          className={`inline-flex items-center gap-1 font-mono-tabular font-bold shrink-0 ${
+                            bestScore >= 80 ? 'text-[#059669]' : 'text-[#D97706]'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{t.sessionBestScore(bestScore)}</span>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-medium shrink-0">
+                          {t.sessionNotTaken}
                         </span>
                       )}
                     </button>
@@ -2487,6 +2581,63 @@ export default function App() {
 
           {/* RIGHT / MINIMAL CONTROL & CURRICULUM DECK (4 cols) */}
           <aside className="lg:col-span-4 space-y-4">
+            {/* Per-Language 20-Session Cumulative Best Score Grid ("회차별 학습 현황" / "Estado por Día") */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 pb-1">
+                <h3 className="font-display text-sm font-bold text-slate-900">
+                  {t.sessionStatusTitle}
+                </h3>
+                <span className="text-xs font-semibold text-[#0284C7]">
+                  {t.sessionStatusSubtitle}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {DAY_SCHEDULES.map((sched) => {
+                  const isSelected = sched.day === selectedDay;
+                  const bestScore = currentLangBestScores[sched.day];
+                  const hasTaken = typeof bestScore === 'number';
+                  const isPassScore = hasTaken && bestScore >= 80;
+
+                  return (
+                    <button
+                      key={sched.day}
+                      type="button"
+                      onClick={() => handleSelectDay(sched.day)}
+                      className={`px-3 py-2.5 rounded-xl text-left transition-all flex items-center justify-between gap-1.5 cursor-pointer ${
+                        isSelected
+                          ? 'border-2 border-[#0284C7] bg-[#0284C7]/[0.04] shadow-2xs'
+                          : 'border border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
+                      }`}
+                    >
+                      <span
+                        className={`text-xs font-bold font-mono-tabular whitespace-nowrap ${
+                          isSelected ? 'text-[#0284C7]' : 'text-slate-800'
+                        }`}
+                      >
+                        {t.dayDropdownBadge(sched.day)}
+                      </span>
+
+                      {hasTaken ? (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[11px] font-mono-tabular font-bold whitespace-nowrap shrink-0 ${
+                            isPassScore ? 'text-[#059669]' : 'text-[#D97706]'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{t.sessionBestScore(bestScore)}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap shrink-0">
+                          {t.sessionNotTaken}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Day Summary & Reroll Card */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -2621,7 +2772,8 @@ export default function App() {
                   <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
                     {DAY_SCHEDULES.map((sched) => {
                       const isSelected = sched.day === selectedDay;
-                      const isDone = completedDays.includes(sched.day);
+                      const bestScore = currentLangBestScores[sched.day];
+                      const hasTaken = typeof bestScore === 'number';
                       const newRangeText =
                         sched.newConceptIds.length > 0
                           ? `Q${sched.newConceptIds[0]}~Q${
@@ -2663,9 +2815,18 @@ export default function App() {
                             </span>
                           </div>
 
-                          {isDone && (
-                            <span className="text-xs font-mono-tabular font-semibold text-[#059669] shrink-0">
-                              ✓
+                          {hasTaken ? (
+                            <span
+                              className={`inline-flex items-center gap-1 text-[11px] font-mono-tabular font-bold shrink-0 ${
+                                bestScore >= 80 ? 'text-[#059669]' : 'text-[#D97706]'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>{t.sessionBestScore(bestScore)}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 font-medium shrink-0">
+                              {t.sessionNotTaken}
                             </span>
                           )}
                         </button>

@@ -96,6 +96,10 @@ export interface LocalizedStrings {
   studyResetDoneBanner: string;
   dayDropdownBadge: (day: number) => string;
   dayDropdownOption: (day: number, subtitle: string) => string;
+  sessionStatusTitle: string;
+  sessionStatusSubtitle: string;
+  sessionBestScore: (score: number) => string;
+  sessionNotTaken: string;
   btnResetProgress: string;
   autoSaveNote: string;
   examTitle: (day: number) => string;
@@ -268,6 +272,10 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     studyResetDoneBanner: '작성했던 모든 답안 칸이 초기화되었습니다. (학습팁 노트는 안전하게 유지됨)',
     dayDropdownBadge: (day: number) => `${day}일차`,
     dayDropdownOption: (day: number, subtitle: string) => `${day}일차 · ${subtitle}`,
+    sessionStatusTitle: '회차별 학습 현황',
+    sessionStatusSubtitle: '최고점수 누적',
+    sessionBestScore: (score: number) => `최고 ${score}점`,
+    sessionNotTaken: '미응시',
     btnResetProgress: '초기화',
     autoSaveNote: '자동 저장됨',
     examTitle: (day: number) => `${day}일차 시험`,
@@ -442,6 +450,10 @@ export const UI_STRINGS: Record<AppLanguage, LocalizedStrings> = {
     studyResetDoneBanner: 'Se han borrado todas las respuestas escritas. (Sus notas de estudio se conservan intactas)',
     dayDropdownBadge: (day: number) => `Día ${day}`,
     dayDropdownOption: (day: number, subtitle: string) => `Día ${day} · ${subtitle}`,
+    sessionStatusTitle: 'Estado por Día',
+    sessionStatusSubtitle: 'Español (Ecuador)',
+    sessionBestScore: (score: number) => `Máx. ${score} pts`,
+    sessionNotTaken: 'Sin examen',
     btnResetProgress: 'Reiniciar',
     autoSaveNote: 'Guardado automático',
     examTitle: (day: number) => `Examen · Día ${day}`,
