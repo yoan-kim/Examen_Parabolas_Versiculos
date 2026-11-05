@@ -1098,19 +1098,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
-      {/* Top Bar Contract: 3 zones separated by gap-8 */}
+      {/* Top Bar Contract: Single row on PC (md+), Two rows on Mobile so all tabs are visible at once */}
       <header
-        className={`sticky top-0 z-30 bg-white border-b px-6 py-3.5 flex items-center justify-between gap-6 transition-colors ${
+        className={`sticky top-0 z-30 bg-white border-b px-4 sm:px-6 py-3 md:py-3.5 flex flex-wrap md:flex-nowrap items-center justify-between gap-y-2.5 gap-x-4 md:gap-6 transition-colors ${
           isAdvancedMode ? 'border-indigo-200 bg-indigo-50/15' : 'border-slate-200'
         }`}
       >
+        {/* Left Zone (Row 1 on Mobile): Brand Title */}
         <a
           href="#study"
           onClick={(e) => {
             e.preventDefault();
             setActiveSection('study');
           }}
-          className="font-display text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 flex items-center gap-2"
+          className="order-1 font-display text-base sm:text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 flex items-center gap-2"
         >
           <span>{t.brandTitle}</span>
           {isAdvancedMode && (
@@ -1120,81 +1121,15 @@ export default function App() {
           )}
         </a>
 
-        <nav className="flex items-center gap-5 sm:gap-6 text-sm font-medium text-slate-600 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setActiveSection('study')}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              activeSection === 'study'
-                ? 'border-[#0284C7] text-slate-900 font-semibold'
-                : 'border-transparent'
-            }`}
-          >
-            {t.navStudy}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection('exam');
-              startNewRandomExamSession(null);
-            }}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              activeSection === 'exam'
-                ? 'border-[#0284C7] text-slate-900 font-semibold'
-                : 'border-transparent'
-            }`}
-          >
-            {t.navExam}
-          </button>
-
-          {/* NEW TAB: 집중공부 (Intensive Study) */}
-          <button
-            type="button"
-            onClick={() => setActiveSection('intensive')}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 flex items-center gap-1.5 cursor-pointer ${
-              activeSection === 'intensive'
-                ? 'border-[#D97706] text-slate-900 font-semibold'
-                : 'border-transparent'
-            }`}
-          >
-            <span>{t.navIntensive}</span>
-            <span className="px-1.5 py-0.5 text-[11px] font-mono-tabular font-bold rounded bg-[#D97706]/15 text-[#D97706]">
-              {bookmarkedIds.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSection('catalog')}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              activeSection === 'catalog'
-                ? 'border-[#0284C7] text-slate-900 font-semibold'
-                : 'border-transparent'
-            }`}
-          >
-            {t.navCatalog}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setLanguage(null)}
-            className="hover:text-[#0284C7] transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 border-transparent flex items-center gap-1 cursor-pointer"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>{t.navChangeLanguage}</span>
-          </button>
-        </nav>
-
-        {/* Right Zone: "고급학습기능" Button */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Right Zone (Row 1 Right on Mobile, Far Right on PC): "고급학습기능" Button */}
+        <div className="order-2 md:order-3 flex items-center gap-1.5 sm:gap-2 shrink-0">
           {isAdvancedMode && (
             <button
               type="button"
               onClick={() => setIsNotebookModalOpen(true)}
-              className="px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <StickyNote className="w-3.5 h-3.5 text-indigo-600" />
+              <StickyNote className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <span>{t.btnOpenNotebook(savedNotesCount)}</span>
             </button>
           )}
@@ -1203,13 +1138,13 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsAdvancedMode((prev) => !prev)}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`px-3 sm:px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
                 isAdvancedMode
                   ? 'bg-indigo-600 text-white hover:bg-indigo-700 ring-2 ring-indigo-500/25 shadow-xs'
                   : 'bg-slate-900 text-white hover:bg-slate-800'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
               <span>
                 {isAdvancedMode ? t.btnAdvancedModeActive : t.btnAdvancedMode}
               </span>
@@ -1227,6 +1162,73 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* Navigation Tabs (Row 2 Full-Width on Mobile so all tabs are visible at once; Center on PC) */}
+        <nav className="order-3 md:order-2 w-full md:w-auto pt-2 md:pt-0 border-t border-slate-100 md:border-t-0 flex flex-wrap items-center justify-between sm:justify-start md:justify-center gap-x-2.5 gap-y-1.5 sm:gap-5 md:gap-6 text-xs sm:text-sm font-medium text-slate-600">
+          <button
+            type="button"
+            onClick={() => setActiveSection('study')}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 py-0.5 border-b-2 cursor-pointer ${
+              activeSection === 'study'
+                ? 'border-[#0284C7] text-slate-900 font-bold'
+                : 'border-transparent'
+            }`}
+          >
+            {t.navStudy}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSection('exam');
+              startNewRandomExamSession(null);
+            }}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 py-0.5 border-b-2 cursor-pointer ${
+              activeSection === 'exam'
+                ? 'border-[#0284C7] text-slate-900 font-bold'
+                : 'border-transparent'
+            }`}
+          >
+            {t.navExam}
+          </button>
+
+          {/* TAB: 집중공부 (Intensive Study) */}
+          <button
+            type="button"
+            onClick={() => setActiveSection('intensive')}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 py-0.5 border-b-2 flex items-center gap-1 cursor-pointer ${
+              activeSection === 'intensive'
+                ? 'border-[#D97706] text-slate-900 font-bold'
+                : 'border-transparent'
+            }`}
+          >
+            <span>{t.navIntensive}</span>
+            <span className="px-1.5 py-0.5 text-[10px] sm:text-[11px] font-mono-tabular font-bold rounded bg-[#D97706]/15 text-[#D97706]">
+              {bookmarkedIds.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection('catalog')}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 py-0.5 border-b-2 cursor-pointer ${
+              activeSection === 'catalog'
+                ? 'border-[#0284C7] text-slate-900 font-bold'
+                : 'border-transparent'
+            }`}
+          >
+            {t.navCatalog}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLanguage(null)}
+            className="hover:text-[#0284C7] transition-colors whitespace-nowrap shrink-0 py-0.5 border-b-2 border-transparent flex items-center gap-1 cursor-pointer"
+          >
+            <Globe className="w-3.5 h-3.5 shrink-0" />
+            <span>{t.navChangeLanguage}</span>
+          </button>
+        </nav>
       </header>
 
       {/* Main Content Container */}

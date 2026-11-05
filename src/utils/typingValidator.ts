@@ -14,7 +14,7 @@ export const QUESTION_KEYWORD_SPECS: Record<number, KeywordSpec> = {
   // Q1: 실체 출현 전, 이를 감추기 위해 비슷한 것으로 빗댄 것 / Es para ocultar el misterio antes de la aparición de la realidad, se compara con algo similar
   1: {
     isShort: false,
-    koSlots: [['실체'], ['출현'], ['감추기'], ['비슷한'], ['빗댄']],
+    koSlots: [['실체'], ['출현'], ['감추기', '감추시기'], ['비슷한'], ['빗댄']],
     esSlots: [['ocultar'], ['misterio'], ['realidad'], ['compara'], ['similar']]
   },
   // Q2: 말씀 / Palabra
@@ -793,10 +793,13 @@ export function evaluateTypingSubmission(
   const rawTargetAnswer = lang === 'ko' ? question.answerKo : question.answerEs;
   const compactTargetAnswer = normalizeCompact(rawTargetAnswer);
 
-  // 철저히 실제 정답(rawTargetAnswer) 내에 포함되어 있는 단어만 유효한 슬롯으로 필터링
+  // 실제 정답(rawTargetAnswer)과 매칭되는 슬롯의 모든 허용 표현(동의어·활용형 포함)을 유지
   const rawSlots = spec ? (lang === 'ko' ? spec.koSlots : spec.esSlots) : [];
   const slots = rawSlots
-    .map((slot) => slot.filter((word) => compactTargetAnswer.includes(normalizeCompact(word))))
+    .filter((slot) =>
+      slot.some((word) => compactTargetAnswer.includes(normalizeCompact(word)))
+    )
+    .map((slot) => slot.map((w) => w.trim()).filter(Boolean))
     .filter((slot) => slot.length > 0);
 
   const isShortQuestion = spec ? spec.isShort && slots.length === 1 : false;
