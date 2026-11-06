@@ -29,11 +29,13 @@ import {
   QUESTIONS,
   CHAPTERS,
   DAY_SCHEDULES,
+  TOTAL_SESSIONS,
   AppLanguage,
   ParableQuestion,
   StudyCardItem,
   sampleRandomIds,
-  buildBidirectionalSessionCards
+  buildBidirectionalSessionCards,
+  getQuestionSessionNumber
 } from './data/questions';
 import { UI_STRINGS } from './data/i18n';
 import { questionHasVerse } from './data/bibleVerses';
@@ -54,7 +56,6 @@ import {
 type ActiveSection = 'study' | 'exam' | 'intensive' | 'catalog';
 type StudyMethod = 'card' | 'typing';
 type StudyLayoutMode = 'cards_list' | 'single_focus';
-type OriginFilter = 'ALL' | 'NEW' | 'REVIEW';
 
 interface DailyReviewStore {
   [day: number]: number[];
@@ -118,6 +119,9 @@ export default function App() {
   // Exam Reset feedback banner state (shown inside Exam tab)
   const [examResetBannerVisible, setExamResetBannerVisible] = useState<boolean>(false);
 
+  // Typing Mode Reset feedback banner state (shown inside Study -> Typing tab)
+  const [typingResetBannerVisible, setTypingResetBannerVisible] = useState<boolean>(false);
+
   // Per-question Study Tip Notes ("학습팁 노트")
   const [studyNotes, setStudyNotes] = useState<Record<number, string>>(() => {
     try {
@@ -140,10 +144,10 @@ export default function App() {
     }
   });
 
-  // Persisted curriculum & progress state
+  // Persisted curriculum & progress state (1..32 sessions)
   const [selectedDay, setSelectedDay] = useState<number>(() => {
     const saved = localStorage.getItem('parabolas99_v2_selected_day');
-    return saved ? Math.min(20, Math.max(1, Number(saved))) : 1;
+    return saved ? Math.min(TOTAL_SESSIONS, Math.max(1, Number(saved))) : 1;
   });
 
   const [completedDays, setCompletedDays] = useState<number[]>(() => {
@@ -202,7 +206,6 @@ export default function App() {
   // Study controls & 2-Step Reveal state (0 = hidden, 1 = meaning shown & verse covered, 2 = full shown)
   const [prioritizeWeakInRandom, setPrioritizeWeakInRandom] = useState<boolean>(false);
   const [studyLayout, setStudyLayout] = useState<StudyLayoutMode>('cards_list');
-  const [originFilter, setOriginFilter] = useState<OriginFilter>('ALL');
   const [revealStageByUid, setRevealStageByUid] = useState<Record<string, RevealStage>>({});
   const [catalogStageById, setCatalogStageById] = useState<Record<number, RevealStage>>({});
   const [revealAll, setRevealAll] = useState<boolean>(false);
@@ -322,21 +325,30 @@ export default function App() {
     [selectedDay]
   );
 
-  // Ensure the selected day has its random review concepts generated
+  // Helper to sample fresh random review IDs for a given session (1..n-1 pool)
+  const drawFreshReviewIdsForSession = (targetDay: number): number[] => {
+    const sched = DAY_SCHEDULES.find((d) => d.day === targetDay) || DAY_SCHEDULES[0];
+    if (sched.reviewConceptCount <= 0 || sched.learnedPoolIds.length === 0) {
+      return [];
+    }
+    const weakPool = sched.learnedPoolIds.filter(
+      (id) => bookmarkedIds.includes(id) || !masteredIds.includes(id)
+    );
+    return sampleRandomIds(
+      sched.learnedPoolIds,
+      sched.reviewConceptCount,
+      prioritizeWeakInRandom ? weakPool : []
+    );
+  };
+
+  // Ensure the selected session has its initial random review concepts generated
   useEffect(() => {
     if (
       currentSchedule.reviewConceptCount > 0 &&
       (!dailyReviews[selectedDay] ||
         dailyReviews[selectedDay].length !== currentSchedule.reviewConceptCount)
     ) {
-      const weakPool = currentSchedule.learnedPoolIds.filter(
-        (id) => bookmarkedIds.includes(id) || !masteredIds.includes(id)
-      );
-      const picked = sampleRandomIds(
-        currentSchedule.learnedPoolIds,
-        currentSchedule.reviewConceptCount,
-        prioritizeWeakInRandom ? weakPool : []
-      );
+      const picked = drawFreshReviewIdsForSession(selectedDay);
       setDailyReviews((prev) => ({ ...prev, [selectedDay]: picked }));
     }
   }, [
@@ -348,8 +360,19 @@ export default function App() {
     masteredIds
   ]);
 
-  // Helper to start or restart the exam with a brand-new random order
-  const startNewRandomExamSession = (mistakeUids: string[] | null = null) => {
+  // Helper to start or restart the exam with a brand-new random order AND freshly sampled cumulative review questions
+  const startNewRandomExamSession = (
+    mistakeUids: string[] | null = null,
+    targetDayOverride?: number
+  ) => {
+    const dayToUse = targetDayOverride ?? selectedDay;
+    if (!mistakeUids) {
+      const sched = DAY_SCHEDULES.find((d) => d.day === dayToUse) || DAY_SCHEDULES[0];
+      if (sched.reviewConceptCount > 0) {
+        const freshlyPicked = drawFreshReviewIdsForSession(dayToUse);
+        setDailyReviews((prev) => ({ ...prev, [dayToUse]: freshlyPicked }));
+      }
+    }
     setExamSessionSeed((s) => s + 1);
     setExamIndex(0);
     setExamDrafts({});
@@ -359,54 +382,42 @@ export default function App() {
     setExamShowResults(false);
   };
 
-  // Exam-tab-only Reset handler: clears exam drafts & results and starts over in a fresh random order while preserving studyNotes
+  // Exam-tab-only Reset handler: clears exam drafts & results, freshly samples 3 review questions from sessions 1..(n-1), and starts over in a fresh random order while preserving studyNotes
   const handleResetExam = () => {
-    startNewRandomExamSession(null);
+    startNewRandomExamSession(null, selectedDay);
     setExamResetBannerVisible(true);
     setTimeout(() => {
       setExamResetBannerVisible(false);
     }, 3200);
   };
 
-  // Select day from dropdown or curriculum and load that day's study & exam questions
+  // Select session from dropdown or curriculum and load that session's study & exam questions
   const handleSelectDay = (day: number) => {
     setSelectedDay(day);
     setFocusCardIndex(0);
     setIsDayDropdownOpen(false);
-    startNewRandomExamSession(null);
+    startNewRandomExamSession(null, day);
   };
 
   const handleRerollReviews = () => {
     if (currentSchedule.reviewConceptCount === 0) return;
-    const weakPool = currentSchedule.learnedPoolIds.filter(
-      (id) => bookmarkedIds.includes(id) || !masteredIds.includes(id)
-    );
-    const picked = sampleRandomIds(
-      currentSchedule.learnedPoolIds,
-      currentSchedule.reviewConceptCount,
-      prioritizeWeakInRandom ? weakPool : []
-    );
-    setDailyReviews((prev) => ({ ...prev, [selectedDay]: picked }));
     setFocusCardIndex(0);
-    startNewRandomExamSession(null);
+    startNewRandomExamSession(null, selectedDay);
   };
 
-  // All 10 Question -> Answer cards for the current day
+  // Study Tab Cards: ONLY New Questions for the selected session (1회차: 6 new, 2~32회차: 3 new)
+  const filteredStudyCards = useMemo(() => {
+    return buildBidirectionalSessionCards(currentSchedule.newConceptIds, []);
+  }, [currentSchedule]);
+
+  // Full 6-Question Exam Pool for the selected session (1회차: 6 new; 2~32회차: 3 new + 3 freshly sampled review from 1..n-1)
   const allDayCards = useMemo(() => {
     const revConceptIds =
       currentSchedule.reviewConceptCount > 0 ? dailyReviews[selectedDay] || [] : [];
     return buildBidirectionalSessionCards(currentSchedule.newConceptIds, revConceptIds);
   }, [currentSchedule, dailyReviews, selectedDay]);
 
-  // Filtered study cards
-  const filteredStudyCards = useMemo(() => {
-    return allDayCards.filter((card) => {
-      if (originFilter !== 'ALL' && card.origin !== originFilter) return false;
-      return true;
-    });
-  }, [allDayCards, originFilter]);
-
-  // Exam items: freshly randomized every time the user enters the exam tab or clicks retry
+  // Exam items: freshly randomized every time the user enters the exam tab, resets the exam, or clicks retry
   const examCards = useMemo(() => {
     void examSessionSeed;
     return shuffleCardsRandomly(allDayCards);
@@ -556,6 +567,36 @@ export default function App() {
     setTimeout(() => {
       studyAnswerInputRefs.current[uid]?.focus();
     }, 20);
+  };
+
+  // Reset all typed answers for the current day's 10 questions and return to question 1
+  const handleResetCurrentDayTyping = () => {
+    setTypingEntries((prev) => {
+      const next = { ...prev };
+      for (const card of allDayCards) {
+        delete next[card.uid];
+      }
+      return next;
+    });
+    setFocusCardIndex(0);
+    setTypingResetBannerVisible(true);
+    setTimeout(() => {
+      setTypingResetBannerVisible(false);
+    }, 3200);
+    setTimeout(() => {
+      const firstCard = filteredStudyCards[0] || allDayCards[0];
+      if (firstCard) {
+        const el = studyAnswerInputRefs.current[firstCard.uid];
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.focus();
+        }
+      }
+    }, 30);
+  };
+
+  const markQuestionMastered = (id: number) => {
+    setMasteredIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   const advanceStudyTypingCard = (currentUid: string) => {
@@ -1293,12 +1334,12 @@ export default function App() {
 
               <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                 {isKo
-                  ? currentSchedule.titleKo.replace(/^\d+일차\s*·\s*/, '')
-                  : currentSchedule.titleEs.replace(/^Día\s*\d+\s*·\s*/, '')}
+                  ? currentSchedule.titleKo.replace(/^\d+(?:일차|회차)\s*·\s*/, '')
+                  : currentSchedule.titleEs.replace(/^(?:Día|Sesión)\s*\d+\s*·\s*/, '')}
               </h1>
             </div>
 
-            {/* Day Dropdown Menu (1일차 ~ 20일차 / Día 1 ~ Día 20) */}
+            {/* Session Dropdown Menu (1회차 ~ 32회차 / Sesión 1 ~ Sesión 32) */}
             {isDayDropdownOpen && (
               <div className="absolute left-0 top-full mt-2 w-80 sm:w-96 max-h-80 overflow-y-auto z-40 bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100 py-1">
                 {DAY_SCHEDULES.map((sched) => {
@@ -1306,8 +1347,8 @@ export default function App() {
                   const bestScore = currentLangBestScores[sched.day];
                   const hasTaken = typeof bestScore === 'number';
                   const subtitle = isKo
-                    ? sched.titleKo.replace(/^\d+일차\s*·\s*/, '')
-                    : sched.titleEs.replace(/^Día\s*\d+\s*·\s*/, '');
+                    ? sched.titleKo.replace(/^\d+(?:일차|회차)\s*·\s*/, '')
+                    : sched.titleEs.replace(/^(?:Día|Sesión)\s*\d+\s*·\s*/, '');
 
                   return (
                     <button
@@ -1395,55 +1436,12 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* All / New / Review filter */}
-                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOriginFilter('ALL');
-                          setFocusCardIndex(0);
-                        }}
-                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          originFilter === 'ALL'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {t.filterAll10}
-                      </button>
-                      {currentSchedule.newConceptIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOriginFilter('NEW');
-                            setFocusCardIndex(0);
-                          }}
-                          className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                            originFilter === 'NEW'
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {t.filterNew} ({currentSchedule.newConceptIds.length})
-                        </button>
-                      )}
-                      {currentSchedule.reviewConceptCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOriginFilter('REVIEW');
-                            setFocusCardIndex(0);
-                          }}
-                          className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                            originFilter === 'REVIEW'
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {t.filterReview} ({currentSchedule.reviewConceptCount})
-                        </button>
-                      )}
-                    </div>
+                    {/* New-only badge for Study Tab (1회차: 신규 6문항, 2~32회차: 신규 3문항) */}
+                    <span className="px-3 py-1.5 text-xs font-bold text-[#0284C7] bg-[#0284C7]/10 rounded-lg font-mono-tabular whitespace-nowrap shrink-0">
+                      {isKo
+                        ? `${t.filterNew} ${currentSchedule.newConceptIds.length}문항`
+                        : `${t.filterNew}: ${currentSchedule.newConceptIds.length}`}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1459,7 +1457,7 @@ export default function App() {
                       {studyLayout === 'cards_list' ? t.layoutList : t.layoutFocus}
                     </button>
 
-                    {studyMethod === 'card' && (
+                    {studyMethod === 'card' ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -1477,9 +1475,29 @@ export default function App() {
                           {revealAll ? t.btnHideAllAnswers : t.btnShowAllAnswers}
                         </span>
                       </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleResetCurrentDayTyping}
+                        title={t.btnResetTypingModeTooltip}
+                        className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200/80 hover:text-slate-900 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-[#0284C7]" />
+                        <span>{t.btnResetTypingMode}</span>
+                      </button>
                     )}
                   </div>
                 </div>
+
+                {/* Typing Reset Confirmation Banner */}
+                {studyMethod === 'typing' && typingResetBannerVisible && (
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                      <span>{t.typingResetDoneBanner}</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Single Focus Card Mode */}
                 {studyLayout === 'single_focus' && currentFocusCard ? (
@@ -1558,6 +1576,13 @@ export default function App() {
                           isAdvancedMode={isAdvancedMode}
                           savedNote={studyNotes[currentFocusCard.question.id] || ''}
                           onSaveNote={handleSaveStudyNote}
+                          onRecordAttempt={handleRecordQuestionAttempt}
+                          onMarkMastered={markQuestionMastered}
+                          onAdvanceNextCard={() =>
+                            setFocusCardIndex((i) =>
+                              i < filteredStudyCards.length - 1 ? i + 1 : 0
+                            )
+                          }
                         />
                       </div>
                     ) : (
@@ -1728,6 +1753,8 @@ export default function App() {
                               isAdvancedMode={isAdvancedMode}
                               savedNote={studyNotes[q.id] || ''}
                               onSaveNote={handleSaveStudyNote}
+                              onRecordAttempt={handleRecordQuestionAttempt}
+                              onMarkMastered={markQuestionMastered}
                             />
                           ) : (
                             renderTypingStudyBox(card)
@@ -2213,7 +2240,7 @@ export default function App() {
                                     isPassed ? 'text-[#059669]' : 'text-red-600'
                                   }`}
                                 >
-                                  {finalPercent}%{' '}
+                                  {isKo ? `${finalPercent}점` : `${finalPercent} pts`}{' '}
                                   <span className="text-sm text-slate-500 font-normal">
                                     ({correctCount}/{totalCount})
                                   </span>
@@ -2496,8 +2523,7 @@ export default function App() {
                     filteredCatalog.map((q) => {
                       const isMastered = masteredIds.includes(q.id);
                       const isBookmarked = bookmarkedIds.includes(q.id);
-                      const introDay =
-                        q.id <= 10 ? 1 : Math.min(19, Math.floor((q.id - 11) / 5) + 2);
+                      const introDay = getQuestionSessionNumber(q.id);
 
                       return (
                         <div
@@ -2509,7 +2535,7 @@ export default function App() {
                               <span className="font-bold text-slate-900">{q.code}</span>
                               <span>·</span>
                               <span>
-                                {isKo ? `${introDay}일차` : `Día ${introDay}`}
+                                {isKo ? `${introDay}회차` : `Sesión ${introDay}`}
                               </span>
                               <span>·</span>
                               <span>
@@ -2571,6 +2597,8 @@ export default function App() {
                             isAdvancedMode={isAdvancedMode}
                             savedNote={studyNotes[q.id] || ''}
                             onSaveNote={handleSaveStudyNote}
+                            onRecordAttempt={handleRecordQuestionAttempt}
+                            onMarkMastered={markQuestionMastered}
                           />
                         </div>
                       );
@@ -2757,7 +2785,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-xs font-mono-tabular font-semibold text-[#059669]">
-                    {completedDays.length}/20
+                    {completedDays.length}/{TOTAL_SESSIONS}
                   </span>
                   <span className="p-1 rounded-md bg-slate-100 text-slate-600 group-hover:bg-[#0284C7]/10 group-hover:text-[#0284C7] transition-colors">
                     {isCurriculumOpen ? (
@@ -2796,7 +2824,7 @@ export default function App() {
                           onClick={() => {
                             setSelectedDay(sched.day);
                             setFocusCardIndex(0);
-                            startNewRandomExamSession(null);
+                            startNewRandomExamSession(null, sched.day);
                           }}
                           className={`w-full text-left px-3 py-2 transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                             isSelected ? 'bg-[#0284C7]/10' : 'hover:bg-slate-50'
@@ -2809,8 +2837,8 @@ export default function App() {
                               }`}
                             >
                               {isKo
-                                ? `${String(sched.day).padStart(2, '0')}일차`
-                                : `Día ${String(sched.day).padStart(2, '0')}`}
+                                ? `${String(sched.day).padStart(2, '0')}회차`
+                                : `Sesión ${String(sched.day).padStart(2, '0')}`}
                             </span>
                             <span className="text-xs text-slate-600 font-mono-tabular truncate">
                               {newRangeText} {revRangeText}

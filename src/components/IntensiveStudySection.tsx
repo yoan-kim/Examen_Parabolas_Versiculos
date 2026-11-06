@@ -91,6 +91,7 @@ export const IntensiveStudySection: React.FC<IntensiveStudySectionProps> = ({
 
   // Typing study entries
   const [typingEntries, setTypingEntries] = useState<Record<number, IntensiveTypingEntry>>({});
+  const [typingResetBannerVisible, setTypingResetBannerVisible] = useState<boolean>(false);
   const typingInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const lastSubmitTimeRef = useRef<number>(0);
 
@@ -271,6 +272,24 @@ export const IntensiveStudySection: React.FC<IntensiveStudySectionProps> = ({
     }
   };
 
+  const handleResetIntensiveTyping = () => {
+    setTypingEntries({});
+    setTypingResetBannerVisible(true);
+    setTimeout(() => {
+      setTypingResetBannerVisible(false);
+    }, 3200);
+    setTimeout(() => {
+      const firstQ = bookmarkedQuestions[0];
+      if (firstQ) {
+        const el = typingInputRefs.current[firstQ.id];
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.focus();
+        }
+      }
+    }, 30);
+  };
+
   // Mini Exam helpers (per-question immediate grading on Enter, locked inputs once graded)
   const startNewRandomMiniExam = (mistakeIds: number[] | null = null) => {
     setExamSessionSeed((s) => s + 1);
@@ -428,8 +447,30 @@ export const IntensiveStudySection: React.FC<IntensiveStudySectionProps> = ({
               <span>{revealAll ? t.btnHideAllAnswers : t.btnShowAllAnswers}</span>
             </button>
           )}
+
+          {subMode === 'typing' && (
+            <button
+              type="button"
+              onClick={handleResetIntensiveTyping}
+              title={t.btnResetTypingModeTooltip}
+              className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200/80 hover:text-slate-900 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-[#0284C7]" />
+              <span>{t.btnResetTypingMode}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Intensive Typing Reset Confirmation Banner */}
+      {subMode === 'typing' && typingResetBannerVisible && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+            <span>{t.typingResetDoneBanner}</span>
+          </div>
+        </div>
+      )}
 
       {/* SUB-MODE 1 & 2: CARD STUDY OR TYPING STUDY */}
       {(subMode === 'card' || subMode === 'typing') && (
@@ -517,6 +558,12 @@ export const IntensiveStudySection: React.FC<IntensiveStudySectionProps> = ({
                     isAdvancedMode={isAdvancedMode}
                     savedNote={studyNotes[q.id] || ''}
                     onSaveNote={onSaveNote}
+                    onRecordAttempt={onRecordAttempt}
+                    onMarkMastered={(id) => {
+                      if (!masteredIds.includes(id)) {
+                        onToggleMastered(id);
+                      }
+                    }}
                   />
                 ) : (
                   <div className="space-y-3 pt-2 border-t border-slate-100">

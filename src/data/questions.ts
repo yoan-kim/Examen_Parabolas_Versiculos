@@ -68,21 +68,30 @@ export interface DaySchedule {
   reviewConceptCount: number;
 }
 
-export const DAY_SCHEDULES: DaySchedule[] = Array.from({ length: 20 }, (_, idx) => {
-  const day = idx + 1;
-  if (day === 1) {
-    return {
-      day: 1,
-      titleKo: "1일차 · 신규 10문항 (Q1~Q10)",
-      titleEs: "Día 1 · 10 nuevas (Q1~Q10)",
-      newConceptIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      learnedPoolIds: [],
-      reviewConceptCount: 0
-    };
-  }
-  if (day <= 18) {
-    const startId = 10 + (day - 2) * 5 + 1;
-    const endId = startId + 4;
+export const TOTAL_SESSIONS = 32;
+
+export function getQuestionSessionNumber(questionId: number): number {
+  if (questionId <= 6) return 1;
+  return Math.min(TOTAL_SESSIONS, Math.floor((questionId - 7) / 3) + 2);
+}
+
+export const DAY_SCHEDULES: DaySchedule[] = Array.from(
+  { length: TOTAL_SESSIONS },
+  (_, idx) => {
+    const day = idx + 1;
+    if (day === 1) {
+      return {
+        day: 1,
+        titleKo: '1회차 · 신규 6문항 (Q1~Q6)',
+        titleEs: 'Sesión 1 · 6 nuevas (Q1~Q6)',
+        newConceptIds: [1, 2, 3, 4, 5, 6],
+        learnedPoolIds: [],
+        reviewConceptCount: 0
+      };
+    }
+
+    const startId = 6 + (day - 2) * 3 + 1;
+    const endId = startId + 2;
     const newIds: number[] = [];
     for (let i = startId; i <= endId; i++) {
       newIds.push(i);
@@ -93,34 +102,14 @@ export const DAY_SCHEDULES: DaySchedule[] = Array.from({ length: 20 }, (_, idx) 
     }
     return {
       day,
-      titleKo: `${day}일차 · 신규 5 (Q${startId}~Q${endId}) + 복습 5`,
-      titleEs: `Día ${day} · 5 nuevas (Q${startId}~Q${endId}) + 5 repaso`,
+      titleKo: `${day}회차 · 신규 3 (Q${startId}~Q${endId}) + 복습 3`,
+      titleEs: `Sesión ${day} · 3 nuevas (Q${startId}~Q${endId}) + 3 repaso`,
       newConceptIds: newIds,
       learnedPoolIds: poolIds,
-      reviewConceptCount: 5
+      reviewConceptCount: 3
     };
   }
-  if (day === 19) {
-    const newIds = [96, 97, 98, 99];
-    const poolIds = Array.from({ length: 95 }, (_, i) => i + 1);
-    return {
-      day: 19,
-      titleKo: "19일차 · 신규 4 (Q96~Q99) + 복습 6",
-      titleEs: "Día 19 · 4 nuevas (Q96~Q99) + 6 repaso",
-      newConceptIds: newIds,
-      learnedPoolIds: poolIds,
-      reviewConceptCount: 6
-    };
-  }
-  return {
-    day: 20,
-    titleKo: "20일차 · 전 범위 랜덤 10문항",
-    titleEs: "Día 20 · 10 aleatorias finales",
-    newConceptIds: [],
-    learnedPoolIds: Array.from({ length: 99 }, (_, i) => i + 1),
-    reviewConceptCount: 10
-  };
-});
+);
 
 export function sampleRandomIds(
   poolIds: number[],
