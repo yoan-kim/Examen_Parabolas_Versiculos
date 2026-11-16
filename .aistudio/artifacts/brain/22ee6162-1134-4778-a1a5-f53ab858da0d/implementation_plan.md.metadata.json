@@ -1,6 +1,0 @@
-{
-  "summary": "Implementation plan for restructuring the curriculum into 32 sessions (Session 1: 6 new; Sessions 2-32: 3 new + 3 cumulative random review = 6 exam questions), showing only new questions in the Study tab, re-sampling review questions from Sessions 1..(n-1) on every Exam entry and Exam Reset, renaming \"일차\" to \"회차\", and rounding 6-question exam scores (5/6 = 83 points, pass >= 80).",
-  "updatedAt": "2026-11-05T17:12:50.912373346Z",
-  "requestFeedback": true,
-  "userFacing": true
-}
